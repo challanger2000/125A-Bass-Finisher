@@ -98,8 +98,6 @@ void MetalFinisherDSP::prepare(double sampleRate) {
 
     autoLevel_.prepare(sampleRate_);
     toneMatch_.prepare(sampleRate_);
-    delay_.prepare(sampleRate_);
-    room_.prepare(sampleRate_);
 
     updateModeTargets();
     reset();
@@ -132,8 +130,6 @@ void MetalFinisherDSP::reset() noexcept {
     resonanceSuppressor_.reset();
     autoLevel_.reset();
     toneMatch_.reset();
-    delay_.reset();
-    room_.reset();
 
     updateModeTargets();
     modeWeights_ = modeWeightTargets_;
@@ -308,30 +304,6 @@ void MetalFinisherDSP::updateMakeupShelfCoefficients() noexcept {
 
     for (auto& filter : makeupHighShelf_)
         filter.setCoefficients(highShelf);
-}
-
-void MetalFinisherDSP::setRoomWet(double normalized) noexcept {
-    room_.setWetDry(normalized);
-}
-
-void MetalFinisherDSP::setRoomDecay(double normalized) noexcept {
-    room_.setDecay(normalized);
-}
-
-void MetalFinisherDSP::setDelayWet(double normalized) noexcept {
-    delay_.setWet(normalized);
-}
-
-void MetalFinisherDSP::setDelayFeedback(double normalized) noexcept {
-    delay_.setFeedback(normalized);
-}
-
-void MetalFinisherDSP::setDelayDivision(double normalized) noexcept {
-    delay_.setDivision(normalized);
-}
-
-void MetalFinisherDSP::setTempo(double bpm) noexcept {
-    delay_.setTempo(bpm);
 }
 
 void MetalFinisherDSP::setToneMatchAmount(double normalized) noexcept {
@@ -605,44 +577,9 @@ void MetalFinisherDSP::processFrame(
         (massFullRight - processedRight) *
         mass_;
 
-    // Lead delay intentionally sits after MASS and before ROOM: the repeats
-    // inherit the finished guitar tone and are then placed into the same room.
-    double delayedLeft = processedLeft;
-    double delayedRight = processedRight;
-
-    delay_.processFrame(
-        processedLeft,
-        processedRight,
-        delayedLeft,
-        delayedRight);
-
-    processedLeft = delayedLeft;
-    processedRight = delayedRight;
-
-    double roomLeft = 0.0;
-    double roomRight = 0.0;
-
-    room_.processFrame(
-        processedLeft,
-        processedRight,
-        roomLeft,
-        roomRight);
-
-    const double roomMix =
-        std::clamp(
-            room_.currentWetDry(),
-            0.0,
-            1.0);
-
-    left =
-        processedLeft +
-        (roomLeft - processedLeft) *
-            roomMix;
-
-    right =
-        processedRight +
-        (roomRight - processedRight) *
-            roomMix;
+    // Bass Finisher has no built-in SPACE stage. MIX FIT feeds OUT directly.
+    left = processedLeft;
+    right = processedRight;
 
     if (!std::isfinite(left))
         left = 0.0;

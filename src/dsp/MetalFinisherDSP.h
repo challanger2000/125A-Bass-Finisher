@@ -4,8 +4,6 @@
 #include "AdaptiveResonanceSuppressor.h"
 #include "AutoLevelCompensator.h"
 #include "Biquad.h"
-#include "IndustrialRoom.h"
-#include "LeadDelay.h"
 #include "LowCutMapping.h"
 #include "ToneMatchDSP.h"
 #include "ToneMatchProfile.h"
@@ -22,12 +20,6 @@ public:
     void setFinish(double normalized) noexcept;
     void setMass(double normalized) noexcept;
     void setLowCut(double normalized) noexcept;
-    void setRoomWet(double normalized) noexcept;
-    void setRoomDecay(double normalized) noexcept;
-    void setDelayWet(double normalized) noexcept;
-    void setDelayFeedback(double normalized) noexcept;
-    void setDelayDivision(double normalized) noexcept;
-    void setTempo(double bpm) noexcept;
     void setToneMatchAmount(double normalized) noexcept;
     void setToneMatchProfile(const ToneMatchProfile& profile) noexcept;
     void clearToneMatchProfile() noexcept;
@@ -108,8 +100,6 @@ private:
     AdaptiveResonanceSuppressor resonanceSuppressor_ {};
     AutoLevelCompensator autoLevel_ {};
     ToneMatchDSP toneMatch_ {};
-    LeadDelay delay_ {};
-    IndustrialRoom room_ {};
 
     double sampleRate_ {44100.0};
     double finish_ {0.0};

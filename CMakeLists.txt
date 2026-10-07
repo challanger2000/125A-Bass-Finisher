@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(HighGainGuitarFinisher VERSION 3.0.0)
+project(BassFinisher VERSION 1.0.0)
 
 find_package(Threads REQUIRED)
 
@@ -35,5 +35,3 @@ FetchContent_MakeAvailable(vst3sdk)
 
 add_subdirectory(src)
 
-enable_testing()
-add_subdirectory(tests)

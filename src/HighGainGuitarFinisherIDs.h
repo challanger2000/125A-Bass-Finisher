@@ -5,28 +5,25 @@
 
 namespace HighGainGuitarFinisher {
 
+// New product identity. These UIDs must never be reused by the Guitar Finisher.
 static const Steinberg::FUID kProcessorUID(
-    0x73A6D21F, 0x4C9B48E1, 0xB825F0A3, 0x1D6E97C4);
+    0x31B748D2, 0xC82F4E6A, 0x9A5713F1, 0x6D2BC405);
 
 static const Steinberg::FUID kControllerUID(
-    0xA4E17C62, 0x8F3D45B9, 0x96C20E71, 0xD53A8B4F);
+    0x8E04A91C, 0x57D34B82, 0xB6C1297A, 0xF043DE15);
 
 enum ParamID : Steinberg::Vst::ParamID {
     kFinish = 100,
-    kRoom,
-    kOutput,
-    kBypass,
-    kLowCut80,
-    kRoomDecay,
-    kMode,
-    kMass,
-    kDelayWet,
-    kDelayFeedback,
-    kDelayDivision,
-    kToneMatchAmount
+    kOutput = 102,
+    kBypass = 103,
+    kLowCut80 = 104,
+    kMode = 106,
+    kMass = 107,
+    kToneMatchAmount = 111
 };
 
-constexpr Steinberg::int32 kStateVersion = 11;
+// Bass Finisher is a new product. State compatibility starts here.
+constexpr Steinberg::int32 kStateVersion = 1;
 constexpr Steinberg::int32 kFirstSupportedStateVersion = 1;
 
 } // namespace HighGainGuitarFinisher
