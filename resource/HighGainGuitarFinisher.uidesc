@@ -40,13 +40,13 @@
   <template name="view"
             class="CViewContainer"
             origin="0,0"
-            size="1320,560"
+            size="932,560"
             transparent="false">
 
     <view class="CView"
           custom-view-name="HGGFPanel"
           origin="0,0"
-          size="1320,560"
+          size="932,560"
           mouse-enabled="false"/>
 
     <!-- HEADER -->
@@ -57,8 +57,8 @@
           mouse-enabled="false"/>
 
     <view class="CTextLabel"
-          origin="285,28"
-          size="750,32"
+          origin="205,28"
+          size="520,32"
           title="BASS FINISHER V1"
           transparent="true"
           font-color="Text"
@@ -67,8 +67,8 @@
           mouse-enabled="false"/>
 
     <view class="CTextLabel"
-          origin="360,66"
-          size="600,14"
+          origin="235,66"
+          size="460,14"
           title="TONE MATCH • FINAL SHAPING • MIX FIT"
           transparent="true"
           font-color="Muted"
@@ -77,8 +77,8 @@
           mouse-enabled="false"/>
 
     <view class="CTextLabel"
-          origin="410,87"
-          size="500,12"
+          origin="270,87"
+          size="390,12"
           title="ZERO LATENCY MATCH • AUTO LEVEL • BASS FOCUSED"
           transparent="true"
           font-color="Minor"
@@ -87,7 +87,7 @@
           mouse-enabled="false"/>
 
     <view class="CSegmentButton"
-          origin="1158,31"
+          origin="770,31"
           size="122,24"
           control-tag="9000"
           default-value="0"
@@ -103,7 +103,7 @@
           round-radius="4"/>
 
     <view class="CTextLabel"
-          origin="1128,62"
+          origin="740,62"
           size="152,12"
           title="PLUGIN STATUS"
           transparent="true"
@@ -113,7 +113,7 @@
           mouse-enabled="false"/>
 
     <view class="CSegmentButton"
-          origin="1128,78"
+          origin="740,78"
           size="152,30"
           control-tag="103"
           default-value="0"
@@ -452,7 +452,7 @@
 
     <!-- OUTPUT -->
     <view class="CTextLabel"
-          origin="1183,137"
+          origin="795,137"
           size="100,18"
           title="O U T"
           transparent="true"
@@ -462,7 +462,7 @@
           mouse-enabled="false"/>
 
     <view class="CTextLabel"
-          origin="1183,158"
+          origin="795,158"
           size="100,12"
           title="FINAL TRIM"
           transparent="true"
@@ -473,11 +473,11 @@
 
     <view class="CView"
           custom-view-name="HGGFKnobOutput"
-          origin="1191,214"
+          origin="803,214"
           size="84,84"/>
 
     <view class="CTextLabel"
-          origin="1183,301"
+          origin="795,301"
           size="100,17"
           title="OUTPUT"
           transparent="true"
@@ -487,7 +487,7 @@
           mouse-enabled="false"/>
 
     <view class="CParamDisplay"
-          origin="1183,322"
+          origin="795,322"
           size="100,19"
           control-tag="102"
           transparent="true"
@@ -498,7 +498,7 @@
           mouse-enabled="false"/>
 
     <view class="CTextLabel"
-          origin="1183,365"
+          origin="795,365"
           size="100,14"
           title="±12 dB"
           transparent="true"
@@ -508,7 +508,7 @@
           mouse-enabled="false"/>
 
     <view class="CTextLabel"
-          origin="1183,512"
+          origin="795,512"
           size="100,12"
           title="v1.0.0"
           transparent="true"
