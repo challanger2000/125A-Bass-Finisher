@@ -122,6 +122,12 @@ public:
 };
 
 void verifyCustomKnobCtrlResetContract() {
+#ifdef _WIN32
+    moduleHandle = GetModuleHandleW(nullptr);
+    BF_REQUIRE(moduleHandle != nullptr);
+#endif
+    BF_REQUIRE(InitModule());
+
     Controller controller;
 
     BF_REQUIRE(
@@ -241,6 +247,9 @@ void verifyCustomKnobCtrlResetContract() {
     BF_REQUIRE(
         controller.terminate() ==
         kResultOk);
+
+    BF_REQUIRE(DeinitModule());
+    moduleHandle = nullptr;
 }
 
 void verifyControllerZoomState() {
