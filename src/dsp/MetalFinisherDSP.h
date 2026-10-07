@@ -104,6 +104,20 @@ private:
     double sampleRate_ {44100.0};
     double finish_ {0.0};
     double mass_ {0.0};
+    double toneMatchAmount_ {0.0};
+
+    // Automatic operating-level conditioning. It is dormant for the exact
+    // neutral path and only engages when a production stage is active.
+    double inputPower_ {0.0};
+    double inputGain_ {1.0};
+    double inputPowerAttack_ {0.0};
+    double inputPowerRelease_ {0.0};
+    double inputGainSmoothing_ {0.0};
+
+    // Linked stereo FINAL peak manager. Below the knee it is mathematically
+    // transparent; only peaks approaching full scale are controlled.
+    double finalGain_ {1.0};
+    double finalRelease_ {0.0};
     double massTrimGain_ {0.9332543007969910};
 
     double modeTarget_ {0.0};
@@ -124,6 +138,8 @@ private:
     void updateMassCoefficients() noexcept;
     void updateMakeupShelfCoefficients() noexcept;
     void updateModeTargets() noexcept;
+    void applyAutoInput(double& left, double& right) noexcept;
+    void applyFinal(double& left, double& right) noexcept;
 };
 
 } // namespace HighGainGuitarFinisher::dsp

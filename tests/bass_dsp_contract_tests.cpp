@@ -145,11 +145,102 @@ void verifyFinishModesAreFiniteDistinctAndLevelBounded() {
 
 }
 
+
+void verifyAutoInputAndFinalContract() {
+    // INPUT AUTO must remain dormant on the exact neutral path.
+    {
+        MetalFinisherDSP dsp;
+        dsp.prepare(kFs);
+        dsp.setFinish(0.0);
+        dsp.setMass(0.0);
+        dsp.setLowCut(0.0);
+        dsp.setToneMatchAmount(0.0);
+        dsp.reset();
+
+        for (int i = 0; i < 4096; ++i) {
+            const double x =
+                0.2 *
+                std::sin(
+                    2.0 * kPi * 82.0 *
+                    static_cast<double>(i) /
+                    kFs);
+            double l = x;
+            double r = x;
+            dsp.processFrame(l, r);
+            BF_REQUIRE(l == x);
+            BF_REQUIRE(r == x);
+        }
+    }
+
+    // With production processing active, very hot material must remain finite
+    // and FINAL must enforce the linked -0.1 dBFS ceiling.
+    {
+        MetalFinisherDSP dsp;
+        dsp.prepare(kFs);
+        dsp.setFinish(1.0);
+        dsp.setMass(1.0);
+        dsp.setToneMatchAmount(0.0);
+        dsp.reset();
+
+        constexpr double ceiling =
+            0.9885530946569389;
+
+        for (int i = 0; i < 48000; ++i) {
+            const double t =
+                static_cast<double>(i) /
+                kFs;
+
+            double l =
+                1.8 *
+                std::sin(
+                    2.0 * kPi * 55.0 * t);
+
+            double r =
+                1.6 *
+                std::sin(
+                    2.0 * kPi * 73.0 * t);
+
+            dsp.processFrame(l, r);
+
+            BF_REQUIRE(std::isfinite(l));
+            BF_REQUIRE(std::isfinite(r));
+            BF_REQUIRE(std::abs(l) <= ceiling + 1.0e-12);
+            BF_REQUIRE(std::abs(r) <= ceiling + 1.0e-12);
+        }
+    }
+
+    // FINAL must not touch ordinary sub-knee material by itself.
+    {
+        MetalFinisherDSP dsp;
+        dsp.prepare(kFs);
+        dsp.reset();
+
+        for (int i = 0; i < 4096; ++i) {
+            const double l0 =
+                0.4 *
+                std::sin(
+                    0.011 * i);
+            const double r0 =
+                0.35 *
+                std::cos(
+                    0.013 * i);
+
+            double l = l0;
+            double r = r0;
+            dsp.processFrame(l, r);
+
+            BF_REQUIRE(l == l0);
+            BF_REQUIRE(r == r0);
+        }
+    }
+}
+
 int main() {
     verifyNeutralPathIsExact();
     verifyLowCutMappingAndResponse();
     verifyBassMassContract();
     verifyFinishModesAreFiniteDistinctAndLevelBounded();
+    verifyAutoInputAndFinalContract();
     std::cout << "Bass Finisher DSP contract tests passed\n";
     return 0;
 }

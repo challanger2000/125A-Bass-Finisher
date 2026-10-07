@@ -27,6 +27,17 @@ constexpr double kMassTrimReductionDbAtMaxLowCut = 0.15;
 // Emergency numerical guard only. +36.1 dBFS is far beyond the intended
 // operating range but keeps hostile/invalid host input from poisoning state.
 constexpr double kEmergencyInputLimit = 64.0;
+
+// INPUT AUTO aims at a stable detector/processing operating level without
+// behaving like a compressor. The bounds are deliberately modest.
+constexpr double kAutoInputTargetRms = 0.12589254117941673; // -18 dBFS
+constexpr double kAutoInputMinimumGain = 0.5011872336272722; // -6 dB
+constexpr double kAutoInputMaximumGain = 1.9952623149688795; // +6 dB
+constexpr double kAutoInputSilencePower = 1.0e-10;
+
+// FINAL is transparent below the knee and linked across both channels.
+constexpr double kFinalKnee = 0.8912509381337456; // -1 dBFS
+constexpr double kFinalCeiling = 0.9885530946569389; // -0.1 dBFS
 }
 
 void MetalFinisherDSP::prepare(double sampleRate) {
@@ -42,6 +53,18 @@ void MetalFinisherDSP::prepare(double sampleRate) {
 
     modeSmoothing_ =
         std::exp(-1.0 / (sampleRate_ * 0.030));
+
+    inputPowerAttack_ =
+        std::exp(-1.0 / (sampleRate_ * 0.050));
+
+    inputPowerRelease_ =
+        std::exp(-1.0 / (sampleRate_ * 0.500));
+
+    inputGainSmoothing_ =
+        std::exp(-1.0 / (sampleRate_ * 0.250));
+
+    finalRelease_ =
+        std::exp(-1.0 / (sampleRate_ * 0.080));
 
     lowEnd_.prepare(
         sampleRate_,
@@ -130,6 +153,10 @@ void MetalFinisherDSP::reset() noexcept {
     resonanceSuppressor_.reset();
     autoLevel_.reset();
     toneMatch_.reset();
+
+    inputPower_ = 0.0;
+    inputGain_ = 1.0;
+    finalGain_ = 1.0;
 
     updateModeTargets();
     modeWeights_ = modeWeightTargets_;
@@ -315,7 +342,15 @@ void MetalFinisherDSP::updateMakeupShelfCoefficients() noexcept {
 }
 
 void MetalFinisherDSP::setToneMatchAmount(double normalized) noexcept {
-    toneMatch_.setAmount(normalized);
+    toneMatchAmount_ =
+        std::clamp(
+            std::isfinite(normalized)
+                ? normalized
+                : 0.0,
+            0.0,
+            1.0);
+
+    toneMatch_.setAmount(toneMatchAmount_);
 }
 
 void MetalFinisherDSP::setToneMatchProfile(
@@ -378,6 +413,109 @@ void MetalFinisherDSP::updateModeTargets() noexcept {
     }
 }
 
+void MetalFinisherDSP::applyAutoInput(
+    double& left,
+    double& right) noexcept {
+
+    const bool productionActive =
+        finish_ > 0.0 ||
+        mass_ > 0.0 ||
+        toneMatchAmount_ > 0.0;
+
+    if (!productionActive) {
+        inputPower_ = 0.0;
+        inputGain_ = 1.0;
+        return;
+    }
+
+    const double instantaneousPower =
+        0.5 *
+        (left * left +
+         right * right);
+
+    const double powerCoefficient =
+        instantaneousPower > inputPower_
+            ? inputPowerAttack_
+            : inputPowerRelease_;
+
+    inputPower_ =
+        powerCoefficient * inputPower_ +
+        (1.0 - powerCoefficient) *
+            instantaneousPower;
+
+    double targetGain = 1.0;
+
+    if (inputPower_ >
+        kAutoInputSilencePower) {
+
+        targetGain =
+            std::clamp(
+                kAutoInputTargetRms /
+                    std::sqrt(inputPower_),
+                kAutoInputMinimumGain,
+                kAutoInputMaximumGain);
+    }
+
+    inputGain_ =
+        inputGainSmoothing_ * inputGain_ +
+        (1.0 - inputGainSmoothing_) *
+            targetGain;
+
+    if (!std::isfinite(inputGain_))
+        inputGain_ = 1.0;
+
+    left *= inputGain_;
+    right *= inputGain_;
+}
+
+void MetalFinisherDSP::applyFinal(
+    double& left,
+    double& right) noexcept {
+
+    const double peak =
+        std::max(
+            std::abs(left),
+            std::abs(right));
+
+    double requiredGain = 1.0;
+
+    if (peak > kFinalKnee) {
+        requiredGain =
+            std::min(
+                1.0,
+                kFinalCeiling /
+                    std::max(
+                        peak,
+                        1.0e-12));
+    }
+
+    if (requiredGain < finalGain_) {
+        // Attack is instantaneous: a new peak cannot overshoot the ceiling.
+        finalGain_ = requiredGain;
+    } else {
+        finalGain_ =
+            finalRelease_ * finalGain_ +
+            (1.0 - finalRelease_);
+    }
+
+    left *= finalGain_;
+    right *= finalGain_;
+
+    // The limiter calculation above is the normal path. This clamp is a
+    // deterministic last line of defence against hostile discontinuities.
+    left =
+        std::clamp(
+            left,
+            -kFinalCeiling,
+            kFinalCeiling);
+
+    right =
+        std::clamp(
+            right,
+            -kFinalCeiling,
+            kFinalCeiling);
+}
+
 void MetalFinisherDSP::processFrame(
     double& left,
     double& right) noexcept {
@@ -432,8 +570,14 @@ void MetalFinisherDSP::processFrame(
         lowCutCoefficientCountdown_ = 0;
     }
 
-    // TONE MATCH is the first production stage: it receives the untouched
-    // post-amp/cab signal. FINISH must then analyse the fully matched signal.
+    // INPUT AUTO is an internal operating-level stage. It is dormant when
+    // FINISH, MASS and MATCH are all neutral, preserving the exact neutral
+    // contract while keeping active processing in a controlled level window.
+    applyAutoInput(
+        left,
+        right);
+
+    // TONE MATCH receives the level-conditioned post-amp/cab signal.
     toneMatch_.processFrame(
         left,
         right);
@@ -585,7 +729,13 @@ void MetalFinisherDSP::processFrame(
         (massFullRight - processedRight) *
         mass_;
 
-    // Bass Finisher has no built-in SPACE stage. MIX FIT feeds OUT directly.
+    // FINAL is always available as a transparent peak guard. Signals below
+    // its knee are untouched; only near-full-scale peaks are managed.
+    applyFinal(
+        processedLeft,
+        processedRight);
+
+    // Bass Finisher has no built-in SPACE stage. FINAL feeds OUT directly.
     left = processedLeft;
     right = processedRight;
 
