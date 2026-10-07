@@ -634,6 +634,42 @@ void verifyPairedTemporalDifference() {
     reference.hasTemporalCurve = true;
     target.temporalFrameCount = 32u;
     reference.temporalFrameCount = 32u;
+    target.hasAlignmentFingerprint = true;
+    reference.hasAlignmentFingerprint = true;
+    target.alignmentFrameCount = 40u;
+    reference.alignmentFrameCount = 40u;
+
+    for (std::size_t frame = 0;
+         frame < 40u;
+         ++frame) {
+
+        const double envelope =
+            -18.0 +
+            5.0 * std::sin(
+                0.43 *
+                static_cast<double>(frame)) +
+            2.5 * std::cos(
+                0.17 *
+                static_cast<double>(frame));
+
+        reference.alignmentLevelDb[frame] =
+            static_cast<float>(envelope);
+
+        const std::size_t shifted =
+            frame >= 3u
+                ? frame - 3u
+                : 0u;
+
+        target.alignmentLevelDb[frame] =
+            static_cast<float>(
+                -18.0 +
+                5.0 * std::sin(
+                    0.43 *
+                    static_cast<double>(shifted)) +
+                2.5 * std::cos(
+                    0.17 *
+                    static_cast<double>(shifted)));
+    }
 
     for (std::size_t frame = 0;
          frame < 32u;

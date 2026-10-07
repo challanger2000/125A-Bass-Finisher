@@ -44,6 +44,8 @@ void ToneMatchAnalyzer::reset() noexcept {
     meanDb_.fill(0.0);
     temporalDb_.fill(0.0f);
     temporalFrameCount_ = 0;
+    alignmentLevelDb_.fill(0.0f);
+    alignmentFrameCount_ = 0;
     fifoFill_ = 0;
     frameCount_ = 0;
 }
@@ -190,6 +192,19 @@ void ToneMatchAnalyzer::processFrame() noexcept {
     // frame would otherwise turn its floor into a tonal signature.
     if (rms < 1.0e-7)
         return;
+
+    if (alignmentFrameCount_ <
+        kAlignmentFrameSlots) {
+
+        alignmentLevelDb_[
+            alignmentFrameCount_++] =
+            static_cast<float>(
+                20.0 *
+                std::log10(
+                    std::max(
+                        rms,
+                        1.0e-12)));
+    }
 
     for (std::size_t i = 0;
          i < kAnalysisFftSize;
@@ -532,6 +547,13 @@ ToneMatchAnalyzer::snapshot() const noexcept {
         static_cast<std::uint32_t>(
             temporalFrameCount_);
     result.temporalDb = temporalDb_;
+    result.hasAlignmentFingerprint =
+        alignmentFrameCount_ >= 8u;
+    result.alignmentFrameCount =
+        static_cast<std::uint32_t>(
+            alignmentFrameCount_);
+    result.alignmentLevelDb =
+        alignmentLevelDb_;
 
     return result;
 }
@@ -1328,65 +1350,172 @@ ToneMatchAnalyzer::makeProfile(
                 target.temporalFrameCount);
 
         int bestShift = 0;
-        double bestScore =
-            std::numeric_limits<double>::
-                infinity();
 
-        for (int shift = -10;
-             shift <= 10;
-             ++shift) {
+        const bool canAlign =
+            reference.hasAlignmentFingerprint &&
+            target.hasAlignmentFingerprint &&
+            reference.alignmentFrameCount >= 8u &&
+            target.alignmentFrameCount >= 8u;
 
-            long double score = 0.0L;
-            std::size_t scoreCount = 0u;
+        if (canAlign) {
+            const int referenceAlignmentCount =
+                static_cast<int>(
+                    reference.alignmentFrameCount);
 
-            for (int targetFrame = 0;
-                 targetFrame < targetCount;
-                 ++targetFrame) {
+            const int targetAlignmentCount =
+                static_cast<int>(
+                    target.alignmentFrameCount);
 
-                const int referenceFrame =
-                    targetFrame + shift;
+            double bestScore =
+                std::numeric_limits<double>::
+                    infinity();
 
-                if (referenceFrame < 0 ||
-                    referenceFrame >=
-                        referenceCount) {
-                    continue;
+            const int maximumShift =
+                std::min(
+                    64,
+                    std::max(
+                        referenceAlignmentCount,
+                        targetAlignmentCount) -
+                        8);
+
+            for (int shift = -maximumShift;
+                 shift <= maximumShift;
+                 ++shift) {
+
+                long double meanReference = 0.0L;
+                long double meanTarget = 0.0L;
+                std::size_t overlap = 0u;
+
+                for (int targetFrame = 0;
+                     targetFrame <
+                        targetAlignmentCount;
+                     ++targetFrame) {
+
+                    const int referenceFrame =
+                        targetFrame + shift;
+
+                    if (referenceFrame < 0 ||
+                        referenceFrame >=
+                            referenceAlignmentCount) {
+                        continue;
+                    }
+
+                    meanReference +=
+                        reference.alignmentLevelDb[
+                            static_cast<std::size_t>(
+                                referenceFrame)];
+
+                    meanTarget +=
+                        target.alignmentLevelDb[
+                            static_cast<std::size_t>(
+                                targetFrame)];
+
+                    ++overlap;
                 }
 
-                for (std::size_t bin = 0;
-                     bin < kTemporalCurveBins;
-                     bin += 8u) {
+                if (overlap < 8u)
+                    continue;
+
+                const double referenceOffset =
+                    static_cast<double>(
+                        meanReference /
+                        static_cast<long double>(
+                            overlap));
+
+                const double targetOffset =
+                    static_cast<double>(
+                        meanTarget /
+                        static_cast<long double>(
+                            overlap));
+
+                long double levelScore = 0.0L;
+                long double transientScore = 0.0L;
+                std::size_t transientCount = 0u;
+
+                bool havePrevious = false;
+                double previousReference = 0.0;
+                double previousTarget = 0.0;
+
+                for (int targetFrame = 0;
+                     targetFrame <
+                        targetAlignmentCount;
+                     ++targetFrame) {
+
+                    const int referenceFrame =
+                        targetFrame + shift;
+
+                    if (referenceFrame < 0 ||
+                        referenceFrame >=
+                            referenceAlignmentCount) {
+                        continue;
+                    }
 
                     const double r =
-                        reference.temporalDb[
-                            static_cast<std::size_t>(
-                                referenceFrame) *
-                                kTemporalCurveBins +
-                            bin];
+                        static_cast<double>(
+                            reference.alignmentLevelDb[
+                                static_cast<std::size_t>(
+                                    referenceFrame)]) -
+                        referenceOffset;
 
                     const double t =
-                        target.temporalDb[
-                            static_cast<std::size_t>(
-                                targetFrame) *
-                                kTemporalCurveBins +
-                            bin];
+                        static_cast<double>(
+                            target.alignmentLevelDb[
+                                static_cast<std::size_t>(
+                                    targetFrame)]) -
+                        targetOffset;
 
-                    const double d = r - t;
-                    score += d * d;
-                    ++scoreCount;
+                    const double levelDifference =
+                        r - t;
+
+                    levelScore +=
+                        levelDifference *
+                        levelDifference;
+
+                    if (havePrevious) {
+                        const double referenceDelta =
+                            r - previousReference;
+
+                        const double targetDelta =
+                            t - previousTarget;
+
+                        const double transientDifference =
+                            referenceDelta -
+                            targetDelta;
+
+                        transientScore +=
+                            transientDifference *
+                            transientDifference;
+
+                        ++transientCount;
+                    }
+
+                    previousReference = r;
+                    previousTarget = t;
+                    havePrevious = true;
                 }
-            }
 
-            if (scoreCount >= 32u) {
-                const double normalizedScore =
+                const double normalizedLevel =
                     static_cast<double>(
-                        score /
+                        levelScore /
                         static_cast<long double>(
-                            scoreCount));
+                            overlap));
 
-                if (normalizedScore <
-                    bestScore) {
-                    bestScore =
-                        normalizedScore;
+                const double normalizedTransient =
+                    transientCount > 0u
+                        ? static_cast<double>(
+                              transientScore /
+                              static_cast<long double>(
+                                  transientCount))
+                        : normalizedLevel;
+
+                // Transient shape is the stronger timing cue; normalized
+                // broadband level adds stability without depending on EQ.
+                const double score =
+                    0.35 * normalizedLevel +
+                    0.65 * normalizedTransient;
+
+                if (score < bestScore) {
+                    bestScore = score;
                     bestShift = shift;
                 }
             }

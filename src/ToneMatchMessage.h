@@ -35,7 +35,7 @@ inline constexpr const char* kToneMatchReferenceSpectrumMessageKey =
     "reference-spectrum";
 
 struct ToneMatchSpectrumMessagePayload {
-    std::uint32_t version {4u};
+    std::uint32_t version {5u};
     double sampleRate {44100.0};
     std::uint64_t frameCount {0u};
     std::array<double, dsp::ToneMatchAnalyzer::kSpectrumBins> meanPower {};
@@ -46,6 +46,10 @@ struct ToneMatchSpectrumMessagePayload {
     std::array<float,
         dsp::ToneMatchAnalyzer::kTemporalFrameSlots *
         dsp::ToneMatchAnalyzer::kTemporalCurveBins> temporalDb {};
+    std::int32_t hasAlignmentFingerprint {0};
+    std::uint32_t alignmentFrameCount {0u};
+    std::array<float,
+        dsp::ToneMatchAnalyzer::kAlignmentFrameSlots> alignmentLevelDb {};
 };
 
 inline ToneMatchSpectrumMessagePayload
@@ -65,6 +69,12 @@ makeToneMatchSpectrumMessage(
         snapshot.temporalFrameCount;
     payload.temporalDb =
         snapshot.temporalDb;
+    payload.hasAlignmentFingerprint =
+        snapshot.hasAlignmentFingerprint ? 1 : 0;
+    payload.alignmentFrameCount =
+        snapshot.alignmentFrameCount;
+    payload.alignmentLevelDb =
+        snapshot.alignmentLevelDb;
     return payload;
 }
 
@@ -72,7 +82,7 @@ inline bool parseToneMatchSpectrumMessage(
     const ToneMatchSpectrumMessagePayload& payload,
     dsp::ToneMatchSpectrumSnapshot& snapshot) noexcept {
 
-    if (payload.version != 4u ||
+    if (payload.version != 5u ||
         !std::isfinite(payload.sampleRate) ||
         payload.sampleRate <= 1000.0 ||
         payload.frameCount == 0u) {
@@ -112,6 +122,22 @@ inline bool parseToneMatchSpectrumMessage(
         }
     }
 
+    if ((payload.hasAlignmentFingerprint != 0 &&
+         payload.hasAlignmentFingerprint != 1) ||
+        payload.alignmentFrameCount >
+            dsp::ToneMatchAnalyzer::
+                kAlignmentFrameSlots) {
+        return false;
+    }
+
+    for (const float db :
+         payload.alignmentLevelDb) {
+        if (!std::isfinite(
+                static_cast<double>(db))) {
+            return false;
+        }
+    }
+
     dsp::ToneMatchSpectrumSnapshot next {};
     next.sampleRate = payload.sampleRate;
     next.frameCount = payload.frameCount;
@@ -125,6 +151,12 @@ inline bool parseToneMatchSpectrumMessage(
         payload.temporalFrameCount;
     next.temporalDb =
         payload.temporalDb;
+    next.hasAlignmentFingerprint =
+        payload.hasAlignmentFingerprint != 0;
+    next.alignmentFrameCount =
+        payload.alignmentFrameCount;
+    next.alignmentLevelDb =
+        payload.alignmentLevelDb;
     snapshot = next;
     return true;
 }

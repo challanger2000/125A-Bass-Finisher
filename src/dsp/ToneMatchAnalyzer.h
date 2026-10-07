@@ -9,8 +9,9 @@
 
 namespace HighGainGuitarFinisher::dsp {
 
-inline constexpr std::size_t kToneMatchTemporalCurveBins = 48;
-inline constexpr std::size_t kToneMatchTemporalFrameSlots = 32;
+inline constexpr std::size_t kToneMatchTemporalCurveBins = 32;
+inline constexpr std::size_t kToneMatchTemporalFrameSlots = 48;
+inline constexpr std::size_t kToneMatchAlignmentFrameSlots = 128;
 
 struct ToneMatchSpectrumSnapshot {
     double sampleRate {44100.0};
@@ -33,6 +34,15 @@ struct ToneMatchSpectrumSnapshot {
     std::array<float,
         kToneMatchTemporalFrameSlots *
         kToneMatchTemporalCurveBins> temporalDb {};
+
+    // Broadband time fingerprint for robust offset estimation. Kept separate
+    // from the tonal curve so alignment is not inferred from a handful of EQ
+    // bins. RMS level is sufficient here because only relative temporal shape
+    // and first differences are compared.
+    bool hasAlignmentFingerprint {false};
+    std::uint32_t alignmentFrameCount {0};
+    std::array<float,
+        kToneMatchAlignmentFrameSlots> alignmentLevelDb {};
 };
 
 class ToneMatchAnalyzer {
@@ -49,6 +59,8 @@ public:
         kToneMatchTemporalCurveBins;
     static constexpr std::size_t kTemporalFrameSlots =
         kToneMatchTemporalFrameSlots;
+    static constexpr std::size_t kAlignmentFrameSlots =
+        kToneMatchAlignmentFrameSlots;
     static constexpr double kCurveMinimumHz = 30.0;
     static constexpr double kCurveMaximumHz = 12000.0;
 
@@ -96,6 +108,9 @@ private:
     std::array<float,
         kTemporalFrameSlots * kTemporalCurveBins> temporalDb_ {};
     std::size_t temporalFrameCount_ {0};
+    std::array<float,
+        kAlignmentFrameSlots> alignmentLevelDb_ {};
+    std::size_t alignmentFrameCount_ {0};
     std::size_t frameCount_ {0};
 };
 
