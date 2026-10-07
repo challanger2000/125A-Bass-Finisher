@@ -11,6 +11,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <vector>
 
 using HighGainGuitarFinisher::Processor;
 using namespace HighGainGuitarFinisher;
@@ -153,11 +154,236 @@ void verifyLifecycleAndBusContracts() {
     BF_REQUIRE(p.terminate() == kResultOk);
 }
 
+
+template <typename Sample>
+void runNeutralProcessingCase(
+    int32 symbolicSampleSize,
+    ProcessModes processMode,
+    bool stereo,
+    int32 blockSize,
+    double sampleRate) {
+
+    Processor p;
+    BF_REQUIRE(p.initialize(nullptr) == kResultOk);
+
+    SpeakerArrangement inputArrangement[1] {
+        stereo ? SpeakerArr::kStereo : SpeakerArr::kMono
+    };
+
+    SpeakerArrangement outputArrangement[1] {
+        stereo ? SpeakerArr::kStereo : SpeakerArr::kMono
+    };
+
+    BF_REQUIRE(
+        p.setBusArrangements(
+            inputArrangement,
+            1,
+            outputArrangement,
+            1) ==
+        kResultOk);
+
+    ProcessSetup setup {};
+    setup.processMode = processMode;
+    setup.symbolicSampleSize = symbolicSampleSize;
+    setup.maxSamplesPerBlock = 1024;
+    setup.sampleRate = sampleRate;
+
+    BF_REQUIRE(p.setupProcessing(setup) == kResultOk);
+    BF_REQUIRE(p.setActive(true) == kResultOk);
+    BF_REQUIRE(p.setProcessing(true) == kResultOk);
+
+    std::vector<Sample> inputLeft(
+        static_cast<std::size_t>(blockSize));
+
+    std::vector<Sample> inputRight(
+        static_cast<std::size_t>(blockSize));
+
+    std::vector<Sample> outputLeft(
+        static_cast<std::size_t>(blockSize),
+        static_cast<Sample>(0));
+
+    std::vector<Sample> outputRight(
+        static_cast<std::size_t>(blockSize),
+        static_cast<Sample>(0));
+
+    for (int32 i = 0; i < blockSize; ++i) {
+        const double t =
+            static_cast<double>(i) /
+            sampleRate;
+
+        inputLeft[static_cast<std::size_t>(i)] =
+            static_cast<Sample>(
+                0.21 *
+                std::sin(
+                    2.0 *
+                    3.14159265358979323846 *
+                    82.41 *
+                    t));
+
+        inputRight[static_cast<std::size_t>(i)] =
+            static_cast<Sample>(
+                0.17 *
+                std::sin(
+                    2.0 *
+                    3.14159265358979323846 *
+                    123.47 *
+                    t));
+    }
+
+    Sample* inputPointers[2] {
+        inputLeft.data(),
+        stereo
+            ? inputRight.data()
+            : inputLeft.data()
+    };
+
+    Sample* outputPointers[2] {
+        outputLeft.data(),
+        stereo
+            ? outputRight.data()
+            : outputLeft.data()
+    };
+
+    AudioBusBuffers inputBus {};
+    inputBus.numChannels = stereo ? 2 : 1;
+
+    AudioBusBuffers outputBus {};
+    outputBus.numChannels = stereo ? 2 : 1;
+
+    if constexpr (std::is_same_v<Sample, float>) {
+        inputBus.channelBuffers32 = inputPointers;
+        outputBus.channelBuffers32 = outputPointers;
+    } else {
+        inputBus.channelBuffers64 = inputPointers;
+        outputBus.channelBuffers64 = outputPointers;
+    }
+
+    ProcessData data {};
+    data.processMode = processMode;
+    data.symbolicSampleSize = symbolicSampleSize;
+    data.numSamples = blockSize;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = &inputBus;
+    data.outputs = &outputBus;
+
+    BF_REQUIRE(p.process(data) == kResultOk);
+    BF_REQUIRE(outputBus.silenceFlags == 0u);
+
+    for (int32 i = 0; i < blockSize; ++i) {
+        const auto index =
+            static_cast<std::size_t>(i);
+
+        BF_REQUIRE(std::isfinite(
+            static_cast<double>(
+                outputLeft[index])));
+
+        BF_REQUIRE(
+            outputLeft[index] ==
+            inputLeft[index]);
+
+        if (stereo) {
+            BF_REQUIRE(std::isfinite(
+                static_cast<double>(
+                    outputRight[index])));
+
+            BF_REQUIRE(
+                outputRight[index] ==
+                inputRight[index]);
+        }
+    }
+
+    std::fill(
+        inputLeft.begin(),
+        inputLeft.end(),
+        static_cast<Sample>(0));
+
+    std::fill(
+        inputRight.begin(),
+        inputRight.end(),
+        static_cast<Sample>(0));
+
+    std::fill(
+        outputLeft.begin(),
+        outputLeft.end(),
+        static_cast<Sample>(1));
+
+    std::fill(
+        outputRight.begin(),
+        outputRight.end(),
+        static_cast<Sample>(1));
+
+    outputBus.silenceFlags = 0u;
+
+    BF_REQUIRE(p.process(data) == kResultOk);
+
+    const uint64 expectedSilenceFlags =
+        stereo ? uint64 {3} : uint64 {1};
+
+    BF_REQUIRE(
+        outputBus.silenceFlags ==
+        expectedSilenceFlags);
+
+    for (const auto value : outputLeft)
+        BF_REQUIRE(value == static_cast<Sample>(0));
+
+    if (stereo) {
+        for (const auto value : outputRight)
+            BF_REQUIRE(value == static_cast<Sample>(0));
+    }
+
+    BF_REQUIRE(p.setProcessing(false) == kResultOk);
+    BF_REQUIRE(p.setActive(false) == kResultOk);
+    BF_REQUIRE(p.terminate() == kResultOk);
+}
+
+void verifyProcessingMatrix() {
+    const int32 blockSizes[] {
+        1,
+        17,
+        256,
+        1024
+    };
+
+    const double sampleRates[] {
+        44100.0,
+        96000.0
+    };
+
+    const ProcessModes processModes[] {
+        kRealtime,
+        kOffline
+    };
+
+    for (const auto processMode : processModes) {
+        for (const bool stereo : {false, true}) {
+            for (const auto blockSize : blockSizes) {
+                for (const auto sampleRate : sampleRates) {
+                    runNeutralProcessingCase<float>(
+                        kSample32,
+                        processMode,
+                        stereo,
+                        blockSize,
+                        sampleRate);
+
+                    runNeutralProcessingCase<double>(
+                        kSample64,
+                        processMode,
+                        stereo,
+                        blockSize,
+                        sampleRate);
+                }
+            }
+        }
+    }
+}
+
 }
 
 int main() {
     verifyParameterFlush();
     verifyLifecycleAndBusContracts();
+    verifyProcessingMatrix();
     std::cout << "Bass Finisher processor contracts passed\n";
     return 0;
 }
