@@ -686,72 +686,338 @@ void refineProfileGains(
     double sampleRate,
     const DesiredCurve& desiredAt) noexcept {
 
-    constexpr std::array<double, 6> steps {
-        2.0, 1.0, 0.5, 0.25, 0.125, 0.0625
-    };
+    constexpr std::size_t kVariableCount =
+        kToneMatchPeakCount + 2u;
 
-    auto optimizeGain =
-        [&](double& gain,
-            double step,
-            double minimum,
-            double maximum) noexcept {
+    constexpr std::size_t kPointCount =
+        128u;
 
-            const double original = gain;
-            double bestGain = original;
-            double bestError =
-                profileFitError(
+    constexpr double kMinimumFitHz =
+        30.0;
+
+    const double maximumFitHz =
+        std::min(
+            10000.0,
+            sampleRate * 0.45);
+
+    const double logMinimum =
+        std::log(kMinimumFitHz);
+
+    const double logMaximum =
+        std::log(maximumFitHz);
+
+    const auto getGain =
+        [&](std::size_t index) noexcept
+            -> double& {
+
+            if (index == 0u)
+                return profile.lowShelfGainDb;
+
+            if (index <=
+                kToneMatchPeakCount) {
+                return profile.peaks[
+                    index - 1u].gainDb;
+            }
+
+            return profile.highShelfGainDb;
+        };
+
+    const auto limitsFor =
+        [&](std::size_t index) noexcept {
+
+            if (index == 0u)
+                return std::pair<double, double> {
+                    -6.0, 4.0
+                };
+
+            if (index <=
+                kToneMatchPeakCount) {
+
+                const double frequency =
+                    profile.peaks[
+                        index - 1u].
+                            frequencyHz;
+
+                return std::pair<double, double> {
+                    -maximumCutAt(
+                        frequency),
+                    maximumBoostAt(
+                        frequency)
+                };
+            }
+
+            return std::pair<double, double> {
+                -6.0, 6.0
+            };
+        };
+
+    std::array<double, kPointCount>
+        frequencies {};
+
+    for (std::size_t i = 0;
+         i < kPointCount;
+         ++i) {
+
+        const double position =
+            static_cast<double>(i) /
+            static_cast<double>(
+                kPointCount - 1u);
+
+        frequencies[i] =
+            std::exp(
+                logMinimum +
+                (logMaximum -
+                 logMinimum) *
+                    position);
+    }
+
+    // Gauss-Newton on the actual summed dB response. Unlike the old
+    // coordinate descent this solves all overlapping gain parameters together
+    // and therefore does not depend on band iteration order.
+    for (int iteration = 0;
+         iteration < 5;
+         ++iteration) {
+
+        std::array<
+            std::array<double, kVariableCount>,
+            kPointCount> jacobian {};
+
+        std::array<double, kPointCount>
+            residual {};
+
+        for (std::size_t point = 0;
+             point < kPointCount;
+             ++point) {
+
+            const double frequency =
+                frequencies[point];
+
+            residual[point] =
+                desiredAt(frequency) -
+                profileResponseDb(
                     profile,
                     sampleRate,
-                    desiredAt);
+                    frequency);
+        }
 
-            for (const double direction :
-                 {-1.0, 1.0}) {
+        constexpr double kProbeDb =
+            0.20;
 
-                gain =
-                    std::clamp(
-                        original +
-                            direction * step,
-                        minimum,
-                        maximum);
+        for (std::size_t variable = 0;
+             variable < kVariableCount;
+             ++variable) {
 
-                const double error =
-                    profileFitError(
+            double& gain =
+                getGain(variable);
+
+            const double original =
+                gain;
+
+            const auto limits =
+                limitsFor(variable);
+
+            const double probe =
+                std::clamp(
+                    original + kProbeDb,
+                    limits.first,
+                    limits.second);
+
+            const double delta =
+                probe - original;
+
+            if (std::abs(delta) <
+                1.0e-12) {
+                continue;
+            }
+
+            gain = probe;
+
+            for (std::size_t point = 0;
+                 point < kPointCount;
+                 ++point) {
+
+                const double changed =
+                    profileResponseDb(
                         profile,
                         sampleRate,
-                        desiredAt);
+                        frequencies[point]);
 
-                if (error < bestError) {
-                    bestError = error;
-                    bestGain = gain;
+                gain = original;
+
+                const double base =
+                    profileResponseDb(
+                        profile,
+                        sampleRate,
+                        frequencies[point]);
+
+                gain = probe;
+
+                jacobian[point][variable] =
+                    (changed - base) /
+                    delta;
+            }
+
+            gain = original;
+        }
+
+        std::array<
+            std::array<double, kVariableCount>,
+            kVariableCount> normal {};
+
+        std::array<double, kVariableCount>
+            rhs {};
+
+        for (std::size_t row = 0;
+             row < kVariableCount;
+             ++row) {
+
+            for (std::size_t point = 0;
+                 point < kPointCount;
+                 ++point) {
+
+                rhs[row] +=
+                    jacobian[point][row] *
+                    residual[point];
+
+                for (std::size_t column = 0;
+                     column < kVariableCount;
+                     ++column) {
+
+                    normal[row][column] +=
+                        jacobian[point][row] *
+                        jacobian[point][column];
                 }
             }
 
-            gain = bestGain;
-        };
-
-    for (const double step : steps) {
-        optimizeGain(
-            profile.lowShelfGainDb,
-            step,
-            -6.0,
-            4.0);
-
-        for (auto& peak :
-             profile.peaks) {
-            optimizeGain(
-                peak.gainDb,
-                step,
-                -maximumCutAt(
-                    peak.frequencyHz),
-                maximumBoostAt(
-                    peak.frequencyHz));
+            // Small Tikhonov damping stabilizes overlapping/near-collinear
+            // filters without intentionally shrinking the solution.
+            normal[row][row] += 1.0e-3;
         }
 
-        optimizeGain(
-            profile.highShelfGainDb,
-            step,
-            -6.0,
-            6.0);
+        // Gaussian elimination with partial pivoting.
+        for (std::size_t pivot = 0;
+             pivot < kVariableCount;
+             ++pivot) {
+
+            std::size_t bestRow =
+                pivot;
+
+            double bestMagnitude =
+                std::abs(
+                    normal[pivot][pivot]);
+
+            for (std::size_t row =
+                     pivot + 1u;
+                 row < kVariableCount;
+                 ++row) {
+
+                const double magnitude =
+                    std::abs(
+                        normal[row][pivot]);
+
+                if (magnitude >
+                    bestMagnitude) {
+                    bestMagnitude =
+                        magnitude;
+                    bestRow = row;
+                }
+            }
+
+            if (bestMagnitude <
+                1.0e-12) {
+                continue;
+            }
+
+            if (bestRow != pivot) {
+                std::swap(
+                    normal[bestRow],
+                    normal[pivot]);
+
+                std::swap(
+                    rhs[bestRow],
+                    rhs[pivot]);
+            }
+
+            const double divisor =
+                normal[pivot][pivot];
+
+            for (std::size_t column =
+                     pivot;
+                 column < kVariableCount;
+                 ++column) {
+                normal[pivot][column] /=
+                    divisor;
+            }
+
+            rhs[pivot] /=
+                divisor;
+
+            for (std::size_t row = 0;
+                 row < kVariableCount;
+                 ++row) {
+
+                if (row == pivot)
+                    continue;
+
+                const double factor =
+                    normal[row][pivot];
+
+                if (std::abs(factor) <
+                    1.0e-18) {
+                    continue;
+                }
+
+                for (std::size_t column =
+                         pivot;
+                     column < kVariableCount;
+                     ++column) {
+
+                    normal[row][column] -=
+                        factor *
+                        normal[pivot][column];
+                }
+
+                rhs[row] -=
+                    factor *
+                    rhs[pivot];
+            }
+        }
+
+        double maximumStep = 0.0;
+
+        for (std::size_t variable = 0;
+             variable < kVariableCount;
+             ++variable) {
+
+            double& gain =
+                getGain(variable);
+
+            const auto limits =
+                limitsFor(variable);
+
+            const double step =
+                std::clamp(
+                    rhs[variable],
+                    -2.0,
+                    2.0);
+
+            const double next =
+                std::clamp(
+                    gain + step,
+                    limits.first,
+                    limits.second);
+
+            maximumStep =
+                std::max(
+                    maximumStep,
+                    std::abs(
+                        next - gain));
+
+            gain = next;
+        }
+
+        if (maximumStep < 0.01)
+            break;
     }
 }
 
