@@ -159,7 +159,7 @@ class LowCutParameter final :
 public:
     LowCutParameter()
     : Parameter(
-        STR16("Low Cut"),
+        STR16("Low Control"),
         kLowCut80,
         STR16("Hz"),
         0.0,

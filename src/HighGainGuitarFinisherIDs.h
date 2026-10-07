@@ -13,16 +13,11 @@ static const Steinberg::FUID kControllerUID(
 
 enum ParamID : Steinberg::Vst::ParamID {
     kFinish = 100,
-    kRoom = 101,          // reserved, not exposed by Bass Finisher
     kOutput = 102,
     kBypass = 103,
     kLowCut80 = 104,
-    kRoomDecay = 105,     // reserved, not exposed by Bass Finisher
     kMode = 106,
     kMass = 107,
-    kDelayWet = 108,      // reserved, not exposed by Bass Finisher
-    kDelayFeedback = 109, // reserved, not exposed by Bass Finisher
-    kDelayDivision = 110, // reserved, not exposed by Bass Finisher
     kToneMatchAmount = 111
 };
 
