@@ -619,6 +619,104 @@ void verifyAnalyzerHasNoUpperDbCeiling() {
 }
 
 
+
+void verifyPairedTemporalDifference() {
+    ToneMatchSpectrumSnapshot target {};
+    ToneMatchSpectrumSnapshot reference {};
+
+    target.sampleRate = 48000.0;
+    reference.sampleRate = 48000.0;
+    target.frameCount = 32u;
+    reference.frameCount = 32u;
+    target.hasLogCurve = true;
+    reference.hasLogCurve = true;
+    target.hasTemporalCurve = true;
+    reference.hasTemporalCurve = true;
+    target.temporalFrameCount = 32u;
+    reference.temporalFrameCount = 32u;
+
+    for (std::size_t frame = 0;
+         frame < 32u;
+         ++frame) {
+
+        for (std::size_t bin = 0;
+             bin <
+                ToneMatchAnalyzer::
+                    kTemporalCurveBins;
+             ++bin) {
+
+            const double position =
+                static_cast<double>(bin) /
+                static_cast<double>(
+                    ToneMatchAnalyzer::
+                        kTemporalCurveBins -
+                    1u);
+
+            const double evolvingContent =
+                4.0 *
+                    std::sin(
+                        0.31 *
+                            static_cast<double>(
+                                frame) +
+                        9.0 * position) +
+                2.0 *
+                    std::cos(
+                        0.17 *
+                            static_cast<double>(
+                                frame) -
+                        5.0 * position);
+
+            const double tonalDelta =
+                3.0 *
+                std::exp(
+                    -0.5 *
+                    std::pow(
+                        (position - 0.35) /
+                            0.08,
+                        2.0)) -
+                2.0 *
+                std::exp(
+                    -0.5 *
+                    std::pow(
+                        (position - 0.70) /
+                            0.10,
+                        2.0));
+
+            target.temporalDb[
+                frame *
+                    ToneMatchAnalyzer::
+                        kTemporalCurveBins +
+                bin] =
+                static_cast<float>(
+                    evolvingContent);
+
+            reference.temporalDb[
+                frame *
+                    ToneMatchAnalyzer::
+                        kTemporalCurveBins +
+                bin] =
+                static_cast<float>(
+                    evolvingContent +
+                    tonalDelta);
+        }
+    }
+
+    const auto profile =
+        ToneMatchAnalyzer::makeProfile(
+            reference,
+            target);
+
+    BF_REQUIRE(profile.valid);
+    BF_REQUIRE(profile.firValid);
+
+    BF_REQUIRE(
+        responseDb(
+            profile,
+            48000.0,
+            250.0) >
+        1.0);
+}
+
 void verifyMeasuredAnalyzerSeparatesLevelFromTone() {
     auto quiet =
         std::make_unique<ToneMatchAnalyzer>();
@@ -722,6 +820,7 @@ int main() {
     verifySubBoostProtection();
     verifyAbsoluteLevelIsNotTone();
     verifyAnalyzerHasNoUpperDbCeiling();
+    verifyPairedTemporalDifference();
     verifyMeasuredAnalyzerSeparatesLevelFromTone();
 
     std::cout

@@ -42,6 +42,8 @@ void ToneMatchAnalyzer::reset() noexcept {
     fifo_.fill(0.0);
     powerSum_.fill(0.0L);
     meanDb_.fill(0.0);
+    temporalDb_.fill(0.0f);
+    temporalFrameCount_ = 0;
     fifoFill_ = 0;
     frameCount_ = 0;
 }
@@ -318,34 +320,50 @@ void ToneMatchAnalyzer::processFrame() noexcept {
                 db);
     }
 
-    // Separate only broadband level from tone. A spectral-bin mean
-    // changes with the tonal content itself and can therefore bend the curve
-    // we are trying to measure. RMS is one frequency-independent scalar, so
-    // subtracting it preserves the full frame shape.
+    // Separate level from tone on every frame before temporal averaging.
+    // This is the #67 baseline that measured best on real program material.
     constexpr double kFrameActivityRangeDb = 60.0;
 
+    long double activeSum = 0.0L;
+    std::size_t activeCount = 0u;
+
+    for (const double db : frameDb) {
+        if (db >=
+            framePeakDb -
+                kFrameActivityRangeDb) {
+            activeSum += db;
+            ++activeCount;
+        }
+    }
+
+    if (activeCount == 0u)
+        return;
+
     const double frameLevelDb =
-        20.0 *
-        std::log10(
-            std::max(
-                rms,
-                1.0e-12));
+        static_cast<double>(
+            activeSum /
+            static_cast<long double>(
+                activeCount));
 
     const std::size_t nextCount =
         frameCount_ + 1u;
+
+    std::array<double, kCurveBins>
+        normalizedFrame {};
 
     for (std::size_t i = 0;
          i < kCurveBins;
          ++i) {
 
-        // Keep an adaptive floor relative to the frame peak so inactive FFT
-        // bins/noise do not dominate the temporal curve.
         const double normalized =
             std::max(
                 frameDb[i],
                 framePeakDb -
                     kFrameActivityRangeDb) -
             frameLevelDb;
+
+        normalizedFrame[i] =
+            normalized;
 
         double sample =
             normalized;
@@ -365,6 +383,54 @@ void ToneMatchAnalyzer::processFrame() noexcept {
             (sample - meanDb_[i]) /
             static_cast<double>(
                 nextCount);
+    }
+
+    if (temporalFrameCount_ <
+        kTemporalFrameSlots) {
+
+        const std::size_t frameIndex =
+            temporalFrameCount_;
+
+        for (std::size_t i = 0;
+             i < kTemporalCurveBins;
+             ++i) {
+
+            const double source =
+                static_cast<double>(i) *
+                static_cast<double>(
+                    kCurveBins - 1u) /
+                static_cast<double>(
+                    kTemporalCurveBins - 1u);
+
+            const std::size_t index0 =
+                static_cast<std::size_t>(
+                    std::floor(source));
+
+            const std::size_t index1 =
+                std::min(
+                    index0 + 1u,
+                    kCurveBins - 1u);
+
+            const double fraction =
+                source -
+                static_cast<double>(
+                    index0);
+
+            const double value =
+                normalizedFrame[index0] +
+                (normalizedFrame[index1] -
+                 normalizedFrame[index0]) *
+                    fraction;
+
+            temporalDb_[
+                frameIndex *
+                    kTemporalCurveBins +
+                i] =
+                static_cast<float>(
+                    value);
+        }
+
+        ++temporalFrameCount_;
     }
 
     ++frameCount_;
@@ -460,6 +526,12 @@ ToneMatchAnalyzer::snapshot() const noexcept {
 
     result.hasLogCurve = true;
     result.meanDb = meanDb_;
+    result.hasTemporalCurve =
+        temporalFrameCount_ >= 4u;
+    result.temporalFrameCount =
+        static_cast<std::uint32_t>(
+            temporalFrameCount_);
+    result.temporalDb = temporalDb_;
 
     return result;
 }
@@ -1237,6 +1309,198 @@ ToneMatchAnalyzer::makeProfile(
             kMaximumMatchHz,
             sampleRate * 0.45);
 
+    std::array<double, kTemporalCurveBins>
+        pairedDifference {};
+
+    bool usePairedTemporal =
+        reference.hasTemporalCurve &&
+        target.hasTemporalCurve &&
+        reference.temporalFrameCount >= 4u &&
+        target.temporalFrameCount >= 4u;
+
+    if (usePairedTemporal) {
+        const int referenceCount =
+            static_cast<int>(
+                reference.temporalFrameCount);
+
+        const int targetCount =
+            static_cast<int>(
+                target.temporalFrameCount);
+
+        int bestShift = 0;
+        double bestScore =
+            std::numeric_limits<double>::
+                infinity();
+
+        for (int shift = -10;
+             shift <= 10;
+             ++shift) {
+
+            long double score = 0.0L;
+            std::size_t scoreCount = 0u;
+
+            for (int targetFrame = 0;
+                 targetFrame < targetCount;
+                 ++targetFrame) {
+
+                const int referenceFrame =
+                    targetFrame + shift;
+
+                if (referenceFrame < 0 ||
+                    referenceFrame >=
+                        referenceCount) {
+                    continue;
+                }
+
+                for (std::size_t bin = 0;
+                     bin < kTemporalCurveBins;
+                     bin += 8u) {
+
+                    const double r =
+                        reference.temporalDb[
+                            static_cast<std::size_t>(
+                                referenceFrame) *
+                                kTemporalCurveBins +
+                            bin];
+
+                    const double t =
+                        target.temporalDb[
+                            static_cast<std::size_t>(
+                                targetFrame) *
+                                kTemporalCurveBins +
+                            bin];
+
+                    const double d = r - t;
+                    score += d * d;
+                    ++scoreCount;
+                }
+            }
+
+            if (scoreCount >= 32u) {
+                const double normalizedScore =
+                    static_cast<double>(
+                        score /
+                        static_cast<long double>(
+                            scoreCount));
+
+                if (normalizedScore <
+                    bestScore) {
+                    bestScore =
+                        normalizedScore;
+                    bestShift = shift;
+                }
+            }
+        }
+
+        for (std::size_t bin = 0;
+             bin < kTemporalCurveBins;
+             ++bin) {
+
+            std::array<double,
+                kTemporalFrameSlots> differences {};
+
+            std::size_t count = 0u;
+
+            for (int targetFrame = 0;
+                 targetFrame < targetCount;
+                 ++targetFrame) {
+
+                const int referenceFrame =
+                    targetFrame + bestShift;
+
+                if (referenceFrame < 0 ||
+                    referenceFrame >=
+                        referenceCount) {
+                    continue;
+                }
+
+                differences[count++] =
+                    static_cast<double>(
+                        reference.temporalDb[
+                            static_cast<std::size_t>(
+                                referenceFrame) *
+                                kTemporalCurveBins +
+                            bin]) -
+                    static_cast<double>(
+                        target.temporalDb[
+                            static_cast<std::size_t>(
+                                targetFrame) *
+                                kTemporalCurveBins +
+                            bin]);
+
+                if (count >=
+                    differences.size()) {
+                    break;
+                }
+            }
+
+            if (count < 4u) {
+                usePairedTemporal = false;
+                break;
+            }
+
+            auto middle =
+                differences.begin() +
+                static_cast<std::ptrdiff_t>(
+                    count / 2u);
+
+            std::nth_element(
+                differences.begin(),
+                middle,
+                differences.begin() +
+                    static_cast<std::ptrdiff_t>(
+                        count));
+
+            pairedDifference[bin] =
+                *middle;
+        }
+    }
+
+    const auto pairedDifferenceAt =
+        [&](double frequency) noexcept {
+
+            const double position =
+                (std::log(
+                    std::clamp(
+                        frequency,
+                        kMinimumMatchHz,
+                        maximumMatchHz)) -
+                 std::log(
+                     kMinimumMatchHz)) /
+                (std::log(
+                     maximumMatchHz) -
+                 std::log(
+                     kMinimumMatchHz));
+
+            const double exactIndex =
+                position *
+                static_cast<double>(
+                    kTemporalCurveBins - 1u);
+
+            const std::size_t index0 =
+                std::min(
+                    static_cast<std::size_t>(
+                        std::floor(
+                            exactIndex)),
+                    kTemporalCurveBins - 1u);
+
+            const std::size_t index1 =
+                std::min(
+                    index0 + 1u,
+                    kTemporalCurveBins - 1u);
+
+            const double fraction =
+                exactIndex -
+                static_cast<double>(
+                    index0);
+
+            return
+                pairedDifference[index0] +
+                (pairedDifference[index1] -
+                 pairedDifference[index0]) *
+                    fraction;
+        };
+
     // Remove only a broadband level offset. The remaining curve is the actual
     // spectral shape difference we want the EQ to realize.
     constexpr std::size_t kOffsetPoints = 256u;
@@ -1266,12 +1530,15 @@ ToneMatchAnalyzer::makeProfile(
                     position);
 
         const double difference =
-            snapshotMagnitudeDb(
-                reference,
-                frequency) -
-            snapshotMagnitudeDb(
-                target,
-                frequency);
+            usePairedTemporal
+                ? pairedDifferenceAt(
+                    frequency)
+                : (snapshotMagnitudeDb(
+                       reference,
+                       frequency) -
+                   snapshotMagnitudeDb(
+                       target,
+                       frequency));
 
         if (std::isfinite(difference)) {
             offsetSum += difference;
@@ -1311,12 +1578,14 @@ ToneMatchAnalyzer::makeProfile(
             const auto differenceAt =
                 [&](double f) noexcept {
                     return
-                        snapshotMagnitudeDb(
-                            reference,
-                            f) -
-                        snapshotMagnitudeDb(
-                            target,
-                            f) -
+                        (usePairedTemporal
+                             ? pairedDifferenceAt(f)
+                             : (snapshotMagnitudeDb(
+                                    reference,
+                                    f) -
+                                snapshotMagnitudeDb(
+                                    target,
+                                    f))) -
                         levelOffsetDb;
                 };
 
@@ -1365,12 +1634,15 @@ ToneMatchAnalyzer::makeProfile(
                 kMinimumMatchHz) {
 
             const double edge =
-                snapshotMagnitudeDb(
-                    reference,
-                    kMinimumMatchHz) -
-                snapshotMagnitudeDb(
-                    target,
-                    kMinimumMatchHz) -
+                (usePairedTemporal
+                     ? pairedDifferenceAt(
+                           kMinimumMatchHz)
+                     : (snapshotMagnitudeDb(
+                            reference,
+                            kMinimumMatchHz) -
+                        snapshotMagnitudeDb(
+                            target,
+                            kMinimumMatchHz))) -
                 levelOffsetDb;
 
             correctionDb =
@@ -1388,12 +1660,15 @@ ToneMatchAnalyzer::makeProfile(
 
                 const double edge =
                     std::clamp(
-                        snapshotMagnitudeDb(
-                            reference,
-                            maximumMatchHz) -
-                        snapshotMagnitudeDb(
-                            target,
-                            maximumMatchHz) -
+                        (usePairedTemporal
+                             ? pairedDifferenceAt(
+                                   maximumMatchHz)
+                             : (snapshotMagnitudeDb(
+                                    reference,
+                                    maximumMatchHz) -
+                                snapshotMagnitudeDb(
+                                    target,
+                                    maximumMatchHz))) -
                         levelOffsetDb,
                         -kMaximumCorrectionDb,
                         kMaximumCorrectionDb);

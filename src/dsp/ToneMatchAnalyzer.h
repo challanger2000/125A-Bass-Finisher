@@ -21,6 +21,13 @@ struct ToneMatchSpectrumSnapshot {
     // a logarithmic 30 Hz .. 12 kHz grid. This is the primary MATCH curve.
     bool hasLogCurve {false};
     std::array<double, 512> meanDb {};
+
+    // Short ordered tonal history used only for paired-frame matching when
+    // reference and target represent the same musical performance. It is not
+    // required for backwards compatibility; meanDb remains the fallback.
+    bool hasTemporalCurve {false};
+    std::uint32_t temporalFrameCount {0};
+    std::array<float, 128 * 128> temporalDb {};
 };
 
 class ToneMatchAnalyzer {
@@ -33,6 +40,8 @@ public:
     static constexpr std::size_t kAnalysisFftSize = 16384;
     static constexpr std::size_t kHopSize = kAnalysisFftSize / 2;
     static constexpr std::size_t kCurveBins = 512;
+    static constexpr std::size_t kTemporalCurveBins = 128;
+    static constexpr std::size_t kTemporalFrameSlots = 128;
     static constexpr double kCurveMinimumHz = 30.0;
     static constexpr double kCurveMaximumHz = 12000.0;
 
@@ -77,6 +86,9 @@ private:
 
     std::array<long double, kSpectrumBins> powerSum_ {};
     std::array<double, kCurveBins> meanDb_ {};
+    std::array<float,
+        kTemporalFrameSlots * kTemporalCurveBins> temporalDb_ {};
+    std::size_t temporalFrameCount_ {0};
     std::size_t frameCount_ {0};
 };
 
