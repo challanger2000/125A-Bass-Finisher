@@ -1,0 +1,87 @@
+#include "TestSupport.h"
+#include "HighGainGuitarFinisherProcessor.h"
+#include "HighGainGuitarFinisherIDs.h"
+#include "ToneMatchStateIO.h"
+#include "public.sdk/source/common/memorystream.h"
+#include "base/source/fstreamer.h"
+#include <cmath>
+#include <iostream>
+
+using namespace HighGainGuitarFinisher;
+using namespace Steinberg;
+
+namespace {
+void rewind(MemoryStream& s){
+    int64 pos=0;
+    BF_REQUIRE(s.seek(0,IBStream::kIBSeekSet,&pos)==kResultOk);
+    BF_REQUIRE(pos==0);
+}
+}
+
+int main(){
+    BF_REQUIRE(kStateVersion==1);
+    BF_REQUIRE(kFirstSupportedStateVersion==1);
+
+    MemoryStream state;
+    IBStreamer w(&state,kLittleEndian);
+    BF_REQUIRE(w.writeInt32(kStateVersion));
+    const double values[6]{0.61,0.54,1.0,0.38,0.5,0.72};
+    for(double v:values) BF_REQUIRE(w.writeDouble(v));
+
+    ToneMatchStatePayload tm{};
+    tm.amount=0.44;
+    tm.profile.valid=true;
+    tm.profile.lowShelfFrequencyHz=72.0;
+    tm.profile.lowShelfGainDb=1.2;
+    tm.profile.highShelfFrequencyHz=6200.0;
+    tm.profile.highShelfGainDb=-1.1;
+    for(std::size_t i=0;i<tm.profile.peaks.size();++i){
+        tm.profile.peaks[i].frequencyHz=100.0+350.0*static_cast<double>(i);
+        tm.profile.peaks[i].q=0.8;
+        tm.profile.peaks[i].gainDb=-1.0+0.2*static_cast<double>(i);
+    }
+    BF_REQUIRE(writeToneMatchState(w,tm));
+
+    dsp::ToneMatchSpectrumSnapshot ref{};
+    ref.sampleRate=48000.0;
+    ref.frameCount=12u;
+    for(std::size_t i=0;i<ref.meanPower.size();++i) ref.meanPower[i]=1.0e-6+1.0e-9*static_cast<double>(i);
+    BF_REQUIRE(writeToneMatchReferenceState(w,ref));
+
+    rewind(state);
+
+    Processor p;
+    BF_REQUIRE(p.setState(&state)==kResultOk);
+
+    MemoryStream saved;
+    BF_REQUIRE(p.getState(&saved)==kResultOk);
+    rewind(saved);
+
+    IBStreamer r(&saved,kLittleEndian);
+    int32 version=0;
+    BF_REQUIRE(r.readInt32(version));
+    BF_REQUIRE(version==1);
+
+    double restored[6]{};
+    for(double& v:restored) BF_REQUIRE(r.readDouble(v));
+    for(int i=0;i<6;++i) BF_REQUIRE(std::abs(restored[i]-values[i])<1.0e-12);
+
+    ToneMatchStatePayload tm2{};
+    BF_REQUIRE(readToneMatchState(r,tm2));
+    BF_REQUIRE(std::abs(tm2.amount-tm.amount)<1.0e-12);
+    BF_REQUIRE(tm2.profile.valid);
+
+    dsp::ToneMatchSpectrumSnapshot ref2{};
+    BF_REQUIRE(readToneMatchReferenceState(r,ref2));
+    BF_REQUIRE(ref2.frameCount==ref.frameCount);
+    BF_REQUIRE(ref2.meanPower==ref.meanPower);
+
+    MemoryStream bad;
+    IBStreamer bw(&bad,kLittleEndian);
+    BF_REQUIRE(bw.writeInt32(99));
+    rewind(bad);
+    BF_REQUIRE(p.setState(&bad)==kResultFalse);
+
+    std::cout<<"Bass Finisher V1 state round-trip passed\n";
+    return 0;
+}
