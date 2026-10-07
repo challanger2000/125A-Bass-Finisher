@@ -1319,14 +1319,52 @@ ToneMatchAnalyzer::makeProfile(
             frequency <=
                 maximumMatchHz) {
 
+            const auto differenceAt =
+                [&](double f) noexcept {
+                    return
+                        snapshotMagnitudeDb(
+                            reference,
+                            f) -
+                        snapshotMagnitudeDb(
+                            target,
+                            f) -
+                        levelOffsetDb;
+                };
+
+            const double center =
+                differenceAt(
+                    frequency);
+
+            const double lower =
+                differenceAt(
+                    std::max(
+                        kMinimumMatchHz,
+                        frequency / 1.025));
+
+            const double upper =
+                differenceAt(
+                    std::min(
+                        maximumMatchHz,
+                        frequency * 1.025));
+
+            const double neighbourMean =
+                0.5 * (lower + upper);
+
+            const double localSpread =
+                std::abs(lower - upper);
+
+            const bool isolatedSpike =
+                std::abs(
+                    center -
+                    neighbourMean) >
+                std::max(
+                    3.0,
+                    2.5 * localSpread);
+
             correctionDb =
-                snapshotMagnitudeDb(
-                    reference,
-                    frequency) -
-                snapshotMagnitudeDb(
-                    target,
-                    frequency) -
-                levelOffsetDb;
+                isolatedSpike
+                    ? neighbourMean
+                    : center;
 
             correctionDb =
                 std::clamp(
