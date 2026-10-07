@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 using HighGainGuitarFinisher::dsp::MetalFinisherDSP;
 using HighGainGuitarFinisher::dsp::lowCutNormalizedFromFrequency;
@@ -415,6 +416,148 @@ void verifyFinishAddsControlledHarmonics() {
         0.08);
 }
 
+
+void verifySampleRatesExtremesAndStereoLink() {
+    const double sampleRates[] {
+        44100.0,
+        48000.0,
+        96000.0,
+        192000.0
+    };
+
+    for (const double fs : sampleRates) {
+        MetalFinisherDSP dsp;
+        dsp.prepare(fs);
+        dsp.setMode(0.5);
+        dsp.setFinish(1.0);
+        dsp.setMass(1.0);
+        dsp.setLowCut(
+            lowCutNormalizedFromFrequency(
+                70.0));
+        dsp.setToneMatchAmount(0.0);
+        dsp.reset();
+
+        const int total =
+            static_cast<int>(
+                std::min(
+                    fs * 0.25,
+                    48000.0));
+
+        for (int i = 0; i < total; ++i) {
+            const double time =
+                static_cast<double>(i) /
+                fs;
+
+            // Deliberately hotter than normal production level to exercise
+            // Auto Input, FINISH, LOW CONTROL, MASS and FINAL together.
+            double l =
+                2.5 *
+                std::sin(
+                    2.0 * kPi * 41.0 * time) +
+                0.8 *
+                std::sin(
+                    2.0 * kPi * 820.0 * time);
+
+            double r =
+                2.1 *
+                std::sin(
+                    2.0 * kPi * 55.0 * time) +
+                0.6 *
+                std::sin(
+                    2.0 * kPi * 1450.0 * time);
+
+            dsp.processFrame(l, r);
+
+            BF_REQUIRE(std::isfinite(l));
+            BF_REQUIRE(std::isfinite(r));
+            BF_REQUIRE(
+                std::abs(l) <=
+                0.9885530946569389 +
+                1.0e-12);
+            BF_REQUIRE(
+                std::abs(r) <=
+                0.9885530946569389 +
+                1.0e-12);
+        }
+
+        dsp.reset();
+
+        for (int i = 0; i < 4096; ++i) {
+            double l = 0.0;
+            double r = 0.0;
+            dsp.processFrame(l, r);
+            BF_REQUIRE(std::isfinite(l));
+            BF_REQUIRE(std::isfinite(r));
+        }
+    }
+
+    // FINAL gain reduction is linked between channels. A hot left channel
+    // must not alter stereo balance by being limited independently.
+    {
+        MetalFinisherDSP dsp;
+        dsp.prepare(kFs);
+        dsp.setFinish(0.0);
+        dsp.setMass(0.0);
+        dsp.setLowCut(0.0);
+        dsp.setToneMatchAmount(0.0);
+        dsp.reset();
+
+        double l = 1.5;
+        double r = 0.3;
+
+        dsp.processFrame(l, r);
+
+        BF_REQUIRE(
+            std::abs(l) <=
+            0.9885530946569389 +
+            1.0e-12);
+
+        BF_REQUIRE(
+            std::abs(
+                (r / l) -
+                0.2) <
+            1.0e-12);
+    }
+}
+
+void verifyPathologicalInputsRecover() {
+    MetalFinisherDSP dsp;
+    dsp.prepare(kFs);
+    dsp.setFinish(1.0);
+    dsp.setMass(1.0);
+    dsp.setLowCut(1.0);
+    dsp.setToneMatchAmount(0.0);
+    dsp.reset();
+
+    double l =
+        std::numeric_limits<double>::infinity();
+
+    double r =
+        std::numeric_limits<double>::quiet_NaN();
+
+    dsp.processFrame(l, r);
+
+    BF_REQUIRE(std::isfinite(l));
+    BF_REQUIRE(std::isfinite(r));
+
+    for (int i = 0; i < 8192; ++i) {
+        const double x =
+            0.1 *
+            std::sin(
+                2.0 * kPi * 90.0 *
+                static_cast<double>(i) /
+                kFs);
+
+        l = x;
+        r = x;
+
+        dsp.processFrame(l, r);
+
+        BF_REQUIRE(std::isfinite(l));
+        BF_REQUIRE(std::isfinite(r));
+    }
+}
+
 int main() {
     verifyNeutralPathIsExact();
     verifyLowCutMappingAndResponse();
@@ -423,6 +566,8 @@ int main() {
     verifyAutoInputAndFinalContract();
     verifyLowControlAndDynamicMass();
     verifyFinishAddsControlledHarmonics();
+    verifySampleRatesExtremesAndStereoLink();
+    verifyPathologicalInputsRecover();
     std::cout << "Bass Finisher DSP contract tests passed\n";
     return 0;
 }
