@@ -786,6 +786,9 @@ void refineProfileShape(
             const double originalFrequency =
                 peak.frequencyHz;
 
+            double bestFrequency =
+                originalFrequency;
+
             const double ratio =
                 frequencyRatios[pass];
 
@@ -809,14 +812,19 @@ void refineProfileShape(
 
                 if (error < bestError) {
                     bestError = error;
-                } else {
-                    peak.frequencyHz =
-                        originalFrequency;
+                    bestFrequency =
+                        peak.frequencyHz;
                 }
             }
 
+            peak.frequencyHz =
+                bestFrequency;
+
             const double originalQ =
                 peak.q;
+
+            double bestQ =
+                originalQ;
 
             const double qRatio =
                 qRatios[pass];
@@ -841,10 +849,13 @@ void refineProfileShape(
 
                 if (error < bestError) {
                     bestError = error;
-                } else {
-                    peak.q = originalQ;
+                    bestQ =
+                        peak.q;
                 }
             }
+
+            peak.q =
+                bestQ;
 
             peak.gainDb =
                 std::clamp(
