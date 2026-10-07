@@ -218,7 +218,8 @@ void runNeutralProcessingCase(
                     2.0 *
                     3.14159265358979323846 *
                     82.41 *
-                    t));
+                    t +
+                    0.37));
 
         inputRight[static_cast<std::size_t>(i)] =
             static_cast<Sample>(
@@ -227,7 +228,8 @@ void runNeutralProcessingCase(
                     2.0 *
                     3.14159265358979323846 *
                     123.47 *
-                    t));
+                    t +
+                    0.61));
     }
 
     Sample* inputPointers[2] {
