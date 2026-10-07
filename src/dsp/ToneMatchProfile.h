@@ -5,7 +5,7 @@
 
 namespace HighGainGuitarFinisher::dsp {
 
-constexpr std::size_t kToneMatchPeakCount = 10;
+constexpr std::size_t kToneMatchPeakCount = 16;
 
 struct ToneMatchPeak {
     double frequencyHz {1000.0};

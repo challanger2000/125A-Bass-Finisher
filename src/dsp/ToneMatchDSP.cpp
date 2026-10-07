@@ -87,6 +87,25 @@ void ToneMatchDSP::setAmount(
             1.0);
 }
 
+void ToneMatchDSP::setBassContext(
+    double lowCutNormalized,
+    double massNormalized) noexcept {
+
+    lowCutContext_ =
+        std::clamp(
+            finiteOr(lowCutNormalized, 0.0),
+            0.0,
+            1.0);
+
+    massContext_ =
+        std::clamp(
+            finiteOr(massNormalized, 0.0),
+            0.0,
+            1.0);
+
+    coefficientCountdown_ = 0;
+}
+
 void ToneMatchDSP::sanitizeProfile(
     const ToneMatchProfile& source) noexcept {
 
@@ -198,13 +217,27 @@ void ToneMatchDSP::updateCoefficients(
             0.0,
             1.0);
 
+    double lowShelfGainDb =
+        profile_.lowShelfGainDb;
+
+    if (lowShelfGainDb > 0.0) {
+        lowShelfGainDb *=
+            std::clamp(
+                1.0 - 0.80 * lowCutContext_,
+                0.20,
+                1.0) *
+            std::clamp(
+                1.0 - 0.40 * massContext_,
+                0.60,
+                1.0);
+    }
+
     const auto low =
         makeLowShelf(
             sampleRate_,
             profile_.
                 lowShelfFrequencyHz,
-            profile_.
-                lowShelfGainDb *
+            lowShelfGainDb *
                 scaledAmount);
 
     const auto high =
@@ -223,14 +256,32 @@ void ToneMatchDSP::updateCoefficients(
          band < peaks_.size();
          ++band) {
 
+        double peakGainDb =
+            profile_.peaks[band].gainDb;
+
+        const double peakFrequencyHz =
+            profile_.peaks[band].frequencyHz;
+
+        if (peakGainDb > 0.0 &&
+            peakFrequencyHz < 180.0) {
+
+            peakGainDb *=
+                std::clamp(
+                    1.0 - 0.75 * lowCutContext_,
+                    0.25,
+                    1.0) *
+                std::clamp(
+                    1.0 - 0.35 * massContext_,
+                    0.65,
+                    1.0);
+        }
+
         const auto coefficients =
             makePeaking(
                 sampleRate_,
-                profile_.peaks[band].
-                    frequencyHz,
+                peakFrequencyHz,
                 profile_.peaks[band].q,
-                profile_.peaks[band].
-                    gainDb *
+                peakGainDb *
                     scaledAmount);
 
         for (auto& filter :

@@ -24,7 +24,7 @@ jobs:
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
       - name: Build plugin and DSP QA
-        run: cmake --build build --config Release --target BassFinisher BassFinisherDSPContractTests BassFinisherToneMatchTests BassFinisherAutomationMathTests BassFinisherBypassCrossfadeTests BassFinisherStateV1Tests BassFinisherProcessorContractTests BassFinisherRealtimeAllocationTests --parallel
+        run: cmake --build build --config Release --target BassFinisher BassFinisherDSPContractTests BassFinisherToneMatchTests BassFinisherAutomationMathTests BassFinisherBypassCrossfadeTests BassFinisherStateV1Tests BassFinisherProcessorContractTests BassFinisherRealtimeAllocationTests BassFinisherToneMatchQualityTests --parallel
 
       - name: Run DSP QA
         run: ctest --test-dir build -C Release --output-on-failure -V

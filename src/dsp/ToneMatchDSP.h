@@ -13,6 +13,9 @@ public:
     void reset() noexcept;
 
     void setAmount(double normalized) noexcept;
+    void setBassContext(
+        double lowCutNormalized,
+        double massNormalized) noexcept;
     void setProfile(const ToneMatchProfile& profile) noexcept;
     void clearProfile() noexcept;
 
@@ -50,6 +53,8 @@ private:
     double amountSmoothed_ {0.0};
     double lastCoefficientAmount_ {-1.0};
     double amountSmoothing_ {0.0};
+    double lowCutContext_ {0.0};
+    double massContext_ {0.0};
 
     int coefficientCountdown_ {0};
     bool prepared_ {false};

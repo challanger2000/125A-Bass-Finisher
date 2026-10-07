@@ -114,3 +114,16 @@ target_include_directories(BassFinisherRealtimeAllocationTests PRIVATE
 target_compile_features(BassFinisherRealtimeAllocationTests PRIVATE cxx_std_17)
 hggf_enable_project_warnings(BassFinisherRealtimeAllocationTests)
 add_test(NAME BassFinisherRealtimeAllocationTests COMMAND BassFinisherRealtimeAllocationTests)
+
+
+add_executable(BassFinisherToneMatchQualityTests
+    tone_match_quality_tests.cpp
+    ../src/dsp/ToneMatchAnalyzer.cpp
+)
+target_include_directories(BassFinisherToneMatchQualityTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/dsp
+)
+target_compile_features(BassFinisherToneMatchQualityTests PRIVATE cxx_std_17)
+hggf_enable_project_warnings(BassFinisherToneMatchQualityTests)
+add_test(NAME BassFinisherToneMatchQualityTests COMMAND BassFinisherToneMatchQualityTests)

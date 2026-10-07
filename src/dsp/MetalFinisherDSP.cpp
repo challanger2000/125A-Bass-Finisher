@@ -195,6 +195,10 @@ void MetalFinisherDSP::setMass(double normalized) noexcept {
                 : 0.0,
             0.0,
             1.0);
+
+    toneMatch_.setBassContext(
+        lowCutTarget_,
+        mass_);
 }
 
 void MetalFinisherDSP::setLowCut(double normalized) noexcept {
@@ -205,6 +209,10 @@ void MetalFinisherDSP::setLowCut(double normalized) noexcept {
                 : 0.0,
             0.0,
             1.0);
+
+    toneMatch_.setBassContext(
+        lowCutTarget_,
+        mass_);
 }
 
 void MetalFinisherDSP::updateLowCutCoefficients() noexcept {

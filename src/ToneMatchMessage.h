@@ -145,7 +145,7 @@ inline bool parseToneMatchReferenceSpectrumMessage(
 struct ToneMatchProfileMessagePayload {
     std::uint32_t version {1u};
     std::int32_t valid {0};
-    std::array<double, 34> values {};
+    std::array<double, 4 + 3 * dsp::kToneMatchPeakCount> values {};
 };
 
 inline ToneMatchProfileMessagePayload
