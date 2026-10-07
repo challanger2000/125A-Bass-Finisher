@@ -375,7 +375,7 @@ void verifySampleAccurateOutputAutomation() {
 
     ParameterChanges changes(1);
     int32 queueIndex = 0;
-    auto* queue = changes.addParameterData(kOutput, queueIndex);
+    auto* queue = changes.addParameterData(HighGainGuitarFinisher::kOutput, queueIndex);
     BF_REQUIRE(queue != nullptr);
 
     int32 pointIndex = 0;
@@ -454,13 +454,13 @@ std::array<std::vector<double>, 2> renderActivePath(
     BF_REQUIRE(p.setProcessing(true) == kResultOk);
 
     ParameterChanges settings(4);
-    addChange(settings, kFinish, 0.67);
+    addChange(settings, HighGainGuitarFinisher::kFinish, 0.67);
     addChange(
         settings,
-        kLowCut80,
+        HighGainGuitarFinisher::kLowCut80,
         dsp::lowCutNormalizedFromFrequency(55.0));
-    addChange(settings, kMode, 0.5);
-    addChange(settings, kMass, 0.72);
+    addChange(settings, HighGainGuitarFinisher::kMode, 0.5);
+    addChange(settings, HighGainGuitarFinisher::kMass, 0.72);
 
     ProcessData flush {};
     flush.processMode = mode;
