@@ -6,6 +6,7 @@ enum class ToneMatchStatus {
     Empty,
     ReferenceReady,
     Analyzing,
+    Matching,
     Ready,
     Error
 };
@@ -18,6 +19,8 @@ inline const char* toneMatchStatusText(
             return "REFERENCE";
         case ToneMatchStatus::Analyzing:
             return "ANALYZING";
+        case ToneMatchStatus::Matching:
+            return "MATCHING";
         case ToneMatchStatus::Ready:
             return "READY";
         case ToneMatchStatus::Error:

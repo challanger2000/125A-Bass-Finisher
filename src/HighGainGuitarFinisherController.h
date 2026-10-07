@@ -5,10 +5,14 @@
 #include "dsp/ToneMatchAnalyzer.h"
 #include "ToneMatchStatus.h"
 #include "vstgui/lib/controls/icontrollistener.h"
+#include "vstgui/lib/cvstguitimer.h"
 #include "vstgui/plugin-bindings/vst3editor.h"
 
+#include <atomic>
 #include <filesystem>
+#include <mutex>
 #include <string>
+#include <thread>
 
 namespace VSTGUI {
 class CControl;
@@ -33,6 +37,8 @@ public:
 
     Steinberg::tresult PLUGIN_API initialize(
         Steinberg::FUnknown* context) override;
+
+    Steinberg::tresult PLUGIN_API terminate() override;
 
     Steinberg::tresult PLUGIN_API setComponentState(
         Steinberg::IBStream* state) override;
@@ -121,6 +127,8 @@ private:
     Steinberg::tresult sendToneMatchReferenceSpectrum(
         const dsp::ToneMatchSpectrumSnapshot& snapshot);
     void tryBuildToneMatchProfile();
+    void stopToneMatchBuildWorker() noexcept;
+    void pollToneMatchBuild();
     void updateToneMatchGui();
     void chooseToneMatchReference(
         VSTGUI::CFrame* frame);
@@ -137,6 +145,15 @@ private:
     dsp::ToneMatchProfile activeToneMatchProfile_ {};
     ToneMatchStatus toneMatchStatus_ {ToneMatchStatus::Empty};
     std::string toneMatchLastError_ {};
+
+    std::thread toneMatchBuildWorker_ {};
+    std::atomic<bool> toneMatchBuildDone_ {false};
+    std::atomic<bool> toneMatchBuildRunning_ {false};
+    std::mutex toneMatchBuildMutex_ {};
+    dsp::ToneMatchProfile pendingToneMatchProfile_ {};
+    bool pendingToneMatchProfileValid_ {false};
+    VSTGUI::SharedPointer<VSTGUI::CVSTGUITimer> toneMatchBuildTimer_ {};
+
     VSTGUI::VST3Editor* editor_ {nullptr};
     VSTGUI::CTextButton* toneMatchLoadButton_ {nullptr};
     VSTGUI::CTextButton* toneMatchAnalyzeButton_ {nullptr};

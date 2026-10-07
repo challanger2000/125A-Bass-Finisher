@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace HighGainGuitarFinisher {
@@ -328,6 +329,12 @@ tresult PLUGIN_API Controller::initialize(
         kToneMatchAmount);
 
     return kResultOk;
+}
+
+tresult PLUGIN_API Controller::terminate() {
+    stopToneMatchBuildWorker();
+    toneMatchBuildTimer_ = nullptr;
+    return EditController::terminate();
 }
 
 tresult PLUGIN_API Controller::setState(
@@ -685,7 +692,9 @@ void Controller::valueChanged(
             ToneMatchStatus::Analyzing) {
 
             stopToneMatchCapture();
-        } else {
+        } else if (
+            toneMatchStatus_ !=
+                ToneMatchStatus::Matching) {
             startToneMatchCapture();
         }
 
@@ -901,6 +910,8 @@ Controller::getParamValueByString(
 tresult PLUGIN_API
 Controller::setComponentState(
     IBStream* state) {
+
+    stopToneMatchBuildWorker();
 
     if (!state)
         return kInvalidArgument;
@@ -1288,6 +1299,7 @@ bool Controller::saveToneMatchReferenceProfile(
 }
 
 void Controller::clearToneMatchTarget() {
+    stopToneMatchBuildWorker();
     toneMatchTargetSpectrum_ = {};
     toneMatchTargetReady_ = false;
     activeToneMatchProfile_ = {};
@@ -1305,6 +1317,7 @@ void Controller::clearToneMatchTarget() {
 }
 
 void Controller::clearToneMatchReference() {
+    stopToneMatchBuildWorker();
     toneMatchReferenceSpectrum_ = {};
     toneMatchReferenceReady_ = false;
     activeToneMatchProfile_ = {};
@@ -1397,27 +1410,159 @@ void Controller::tryBuildToneMatchProfile() {
         return;
     }
 
-    const auto profile =
-        dsp::ToneMatchAnalyzer::makeProfile(
-            toneMatchReferenceSpectrum_,
-            toneMatchTargetSpectrum_);
+    // Never run the expensive matcher on the host/UI thread. The old
+    // synchronous path froze Studio One for minutes with the 64-band solver.
+    stopToneMatchBuildWorker();
 
-    if (!profile.valid) {
+    const auto reference =
+        toneMatchReferenceSpectrum_;
+
+    const auto target =
+        toneMatchTargetSpectrum_;
+
+    {
+        std::lock_guard<std::mutex> lock(
+            toneMatchBuildMutex_);
+
+        pendingToneMatchProfile_ = {};
+        pendingToneMatchProfileValid_ =
+            false;
+    }
+
+    toneMatchBuildDone_.store(
+        false,
+        std::memory_order_release);
+
+    toneMatchBuildRunning_.store(
+        true,
+        std::memory_order_release);
+
+    toneMatchStatus_ =
+        ToneMatchStatus::Matching;
+
+    toneMatchLastError_.clear();
+    updateToneMatchGui();
+
+    try {
+        toneMatchBuildWorker_ =
+            std::thread(
+                [this,
+                 reference,
+                 target]() noexcept {
+
+                    const auto profile =
+                        dsp::ToneMatchAnalyzer::
+                            makeProfile(
+                                reference,
+                                target);
+
+                    {
+                        std::lock_guard<std::mutex>
+                            lock(
+                                toneMatchBuildMutex_);
+
+                        pendingToneMatchProfile_ =
+                            profile;
+
+                        pendingToneMatchProfileValid_ =
+                            profile.valid;
+                    }
+
+                    toneMatchBuildRunning_.store(
+                        false,
+                        std::memory_order_release);
+
+                    toneMatchBuildDone_.store(
+                        true,
+                        std::memory_order_release);
+                });
+    } catch (...) {
+        toneMatchBuildRunning_.store(
+            false,
+            std::memory_order_release);
+
         toneMatchStatus_ =
             ToneMatchStatus::Error;
+
         toneMatchLastError_ =
-            "Reference and target could not be matched";
+            "Cannot start Tone Match calculation";
+
         updateToneMatchGui();
         return;
     }
+
+    if (!toneMatchBuildTimer_) {
+        toneMatchBuildTimer_ =
+            VSTGUI::makeOwned<
+                VSTGUI::CVSTGUITimer>(
+                    [this](
+                        VSTGUI::CVSTGUITimer*) {
+                        pollToneMatchBuild();
+                    },
+                    50);
+    }
+}
+
+void Controller::stopToneMatchBuildWorker() noexcept {
+    if (toneMatchBuildWorker_.joinable())
+        toneMatchBuildWorker_.join();
+
+    toneMatchBuildRunning_.store(
+        false,
+        std::memory_order_release);
+}
+
+void Controller::pollToneMatchBuild() {
+    if (!toneMatchBuildDone_.exchange(
+            false,
+            std::memory_order_acq_rel)) {
+        return;
+    }
+
+    if (toneMatchBuildWorker_.joinable())
+        toneMatchBuildWorker_.join();
+
+    dsp::ToneMatchProfile profile {};
+    bool valid = false;
+
+    {
+        std::lock_guard<std::mutex> lock(
+            toneMatchBuildMutex_);
+
+        profile =
+            pendingToneMatchProfile_;
+
+        valid =
+            pendingToneMatchProfileValid_;
+    }
+
+    if (!valid) {
+        toneMatchStatus_ =
+            ToneMatchStatus::Error;
+
+        toneMatchLastError_ =
+            "Reference and target could not be matched";
+
+        updateToneMatchGui();
+        return;
+    }
+
+    activeToneMatchProfile_ =
+        profile;
 
     if (sendToneMatchProfile(profile) !=
         Steinberg::kResultOk) {
 
         toneMatchStatus_ =
             ToneMatchStatus::Error;
+
         toneMatchLastError_ =
             "Cannot apply Tone Match profile";
+    } else {
+        toneMatchStatus_ =
+            ToneMatchStatus::Ready;
+
+        toneMatchLastError_.clear();
     }
 
     updateToneMatchGui();
@@ -1440,7 +1585,15 @@ void Controller::updateToneMatchGui() {
                 toneMatchStatus_ ==
                     ToneMatchStatus::Analyzing
                     ? "STOP ANALYSIS"
-                    : "ANALYZE TARGET");
+                    : (toneMatchStatus_ ==
+                           ToneMatchStatus::Matching
+                       ? "MATCHING..."
+                       : "ANALYZE TARGET"));
+
+        toneMatchAnalyzeButton_->
+            setMouseEnabled(
+                toneMatchStatus_ !=
+                    ToneMatchStatus::Matching);
 
         toneMatchAnalyzeButton_->
             invalid();
