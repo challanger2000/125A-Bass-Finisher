@@ -52,6 +52,122 @@ double massDelta(double frequency, double lowCut) {
                    steadyRms(frequency, lowCut, 0.0));
 }
 
+struct LowControlPairMeasurement {
+    double sub30 {0.0};
+    double body120 {0.0};
+};
+
+LowControlPairMeasurement measureLowControlPair(
+    double lowCut,
+    bool adaptivePath) {
+
+    MetalFinisherDSP dsp;
+    dsp.prepare(kFs);
+    dsp.setFinish(0.0);
+    dsp.setToneMatchAmount(0.0);
+    dsp.setLowCut(lowCut);
+    dsp.setMass(0.0);
+    dsp.reset();
+
+    HighGainGuitarFinisher::dsp::Biquad staticHighPass;
+    staticHighPass.setCoefficients(
+        HighGainGuitarFinisher::dsp::makeHighPass(
+            kFs,
+            lowCutFrequencyFromNormalized(lowCut),
+            0.7071067811865476));
+
+    constexpr double subFrequency = 30.0;
+    constexpr double bodyFrequency = 120.0;
+    constexpr double subAmplitude = 0.40;
+    constexpr double bodyAmplitude = 0.04;
+    constexpr int total = static_cast<int>(kFs * 4.0);
+    constexpr int start = static_cast<int>(kFs * 3.0);
+
+    long double subSin = 0.0L;
+    long double subCos = 0.0L;
+    long double bodySin = 0.0L;
+    long double bodyCos = 0.0L;
+    int count = 0;
+
+    for (int i = 0; i < total; ++i) {
+        const double time =
+            static_cast<double>(i) / kFs;
+
+        const double x =
+            subAmplitude *
+                std::sin(
+                    2.0 * kPi *
+                    subFrequency *
+                    time) +
+            bodyAmplitude *
+                std::sin(
+                    2.0 * kPi *
+                    bodyFrequency *
+                    time);
+
+        double y = 0.0;
+
+        if (adaptivePath) {
+            double l = x;
+            double r = x;
+            dsp.processFrame(l, r);
+            BF_REQUIRE(std::isfinite(l));
+            BF_REQUIRE(std::isfinite(r));
+            y = l;
+        } else {
+            y = staticHighPass.process(x);
+            BF_REQUIRE(std::isfinite(y));
+        }
+
+        if (i >= start) {
+            const double subPhase =
+                2.0 * kPi *
+                subFrequency *
+                time;
+
+            const double bodyPhase =
+                2.0 * kPi *
+                bodyFrequency *
+                time;
+
+            subSin +=
+                static_cast<long double>(
+                    y * std::sin(subPhase));
+
+            subCos +=
+                static_cast<long double>(
+                    y * std::cos(subPhase));
+
+            bodySin +=
+                static_cast<long double>(
+                    y * std::sin(bodyPhase));
+
+            bodyCos +=
+                static_cast<long double>(
+                    y * std::cos(bodyPhase));
+
+            ++count;
+        }
+    }
+
+    const auto amplitude =
+        [count](long double sinAcc,
+                long double cosAcc) {
+            return
+                2.0 *
+                std::sqrt(
+                    static_cast<double>(
+                        sinAcc * sinAcc +
+                        cosAcc * cosAcc)) /
+                static_cast<double>(count);
+        };
+
+    return {
+        amplitude(subSin, subCos),
+        amplitude(bodySin, bodyCos)
+    };
+}
+
 void verifyNeutralPathIsExact() {
     MetalFinisherDSP dsp;
     dsp.prepare(kFs);
@@ -321,6 +437,46 @@ void verifyLowControlAndDynamicMass() {
     BF_REQUIRE(
         subAfter <
         subBefore * 0.20);
+
+    // Regression for the adaptive LOW CONTROL stage through the real audio
+    // path. A 10:1 30 Hz / 120 Hz fixture represents severe sub dominance.
+    // Compare it against the exact same static high-pass boundary so the
+    // additional delta can only come from the adaptive containment stage.
+    //
+    // Product contract at a 55 Hz boundary:
+    // - dominant 30 Hz sub must receive at least 0.75 dB additional control;
+    // - useful 120 Hz body must lose less than 0.10 dB from that adaptation.
+    const double adaptiveCut =
+        lowCutNormalizedFromFrequency(
+            55.0);
+
+    const auto staticOnly =
+        measureLowControlPair(
+            adaptiveCut,
+            false);
+
+    const auto adaptive =
+        measureLowControlPair(
+            adaptiveCut,
+            true);
+
+    const double adaptiveSubDeltaDb =
+        dbRatio(
+            adaptive.sub30,
+            staticOnly.sub30);
+
+    const double adaptiveBodyDeltaDb =
+        dbRatio(
+            adaptive.body120,
+            staticOnly.body120);
+
+    BF_REQUIRE(
+        adaptiveSubDeltaDb <=
+        -0.75);
+
+    BF_REQUIRE(
+        adaptiveBodyDeltaDb >
+        -0.10);
 
     // MASS is no longer only a static EQ: the band-limited nonlinear residual
     // must create measurable third harmonic content from an 80 Hz sine.
