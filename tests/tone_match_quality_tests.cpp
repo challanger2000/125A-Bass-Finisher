@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <memory>
 
 using namespace HighGainGuitarFinisher::dsp;
 
@@ -619,11 +620,14 @@ void verifyAnalyzerHasNoUpperDbCeiling() {
 
 
 void verifyMeasuredAnalyzerSeparatesLevelFromTone() {
-    ToneMatchAnalyzer quiet;
-    ToneMatchAnalyzer loud;
+    auto quiet =
+        std::make_unique<ToneMatchAnalyzer>();
 
-    quiet.prepare(48000.0);
-    loud.prepare(48000.0);
+    auto loud =
+        std::make_unique<ToneMatchAnalyzer>();
+
+    quiet->prepare(48000.0);
+    loud->prepare(48000.0);
 
     constexpr std::size_t sampleCount =
         ToneMatchAnalyzer::kAnalysisFftSize * 6u;
@@ -663,12 +667,12 @@ void verifyMeasuredAnalyzerSeparatesLevelFromTone() {
             l[i] = x;
         }
 
-        quiet.pushStereo(
+        quiet->pushStereo(
             q.data(),
             q.data(),
             count);
 
-        loud.pushStereo(
+        loud->pushStereo(
             l.data(),
             l.data(),
             count);
@@ -677,10 +681,10 @@ void verifyMeasuredAnalyzerSeparatesLevelFromTone() {
     }
 
     const auto quietSnapshot =
-        quiet.snapshot();
+        quiet->snapshot();
 
     const auto loudSnapshot =
-        loud.snapshot();
+        loud->snapshot();
 
     BF_REQUIRE(quietSnapshot.hasLogCurve);
     BF_REQUIRE(loudSnapshot.hasLogCurve);
