@@ -477,6 +477,63 @@ void verifyNarrowSpikeIsRejected() {
         3.0);
 }
 
+void verifyHighRangeCorrectionIsNotArtificiallyCapped() {
+    auto target =
+        makeTarget(48000.0);
+
+    auto reference =
+        target;
+
+    for (std::size_t i = 1;
+         i < reference.meanPower.size();
+         ++i) {
+
+        const double frequency =
+            static_cast<double>(i) *
+            48000.0 /
+            ToneMatchAnalyzer::kFftSize;
+
+        const double db =
+            18.0 *
+            gaussianLog(
+                frequency,
+                900.0,
+                0.34) -
+            17.0 *
+            gaussianLog(
+                frequency,
+                4200.0,
+                0.30);
+
+        reference.meanPower[i] *=
+            std::pow(
+                10.0,
+                db / 10.0);
+    }
+
+    const auto profile =
+        ToneMatchAnalyzer::makeProfile(
+            reference,
+            target);
+
+    BF_REQUIRE(profile.valid);
+    BF_REQUIRE(profile.firValid);
+
+    BF_REQUIRE(
+        responseDb(
+            profile,
+            48000.0,
+            900.0) >
+        14.0);
+
+    BF_REQUIRE(
+        responseDb(
+            profile,
+            48000.0,
+            4200.0) <
+        -13.0);
+}
+
 void verifySubBoostProtection() {
     auto target =
         makeTarget(48000.0);
@@ -507,7 +564,7 @@ void verifySubBoostProtection() {
             profile,
             48000.0,
             40.0) <=
-        12.000001);
+        24.000001);
 }
 
 }
@@ -619,140 +676,6 @@ void verifyAnalyzerHasNoUpperDbCeiling() {
 }
 
 
-
-void verifyPairedTemporalDifference() {
-    ToneMatchSpectrumSnapshot target {};
-    ToneMatchSpectrumSnapshot reference {};
-
-    target.sampleRate = 48000.0;
-    reference.sampleRate = 48000.0;
-    target.frameCount = 32u;
-    reference.frameCount = 32u;
-    target.hasLogCurve = true;
-    reference.hasLogCurve = true;
-    target.hasTemporalCurve = true;
-    reference.hasTemporalCurve = true;
-    target.temporalFrameCount = 32u;
-    reference.temporalFrameCount = 32u;
-    target.hasAlignmentFingerprint = true;
-    reference.hasAlignmentFingerprint = true;
-    target.alignmentFrameCount = 40u;
-    reference.alignmentFrameCount = 40u;
-
-    for (std::size_t frame = 0;
-         frame < 40u;
-         ++frame) {
-
-        const double envelope =
-            -18.0 +
-            5.0 * std::sin(
-                0.43 *
-                static_cast<double>(frame)) +
-            2.5 * std::cos(
-                0.17 *
-                static_cast<double>(frame));
-
-        reference.alignmentLevelDb[frame] =
-            static_cast<float>(envelope);
-
-        const std::size_t shifted =
-            frame >= 3u
-                ? frame - 3u
-                : 0u;
-
-        target.alignmentLevelDb[frame] =
-            static_cast<float>(
-                -18.0 +
-                5.0 * std::sin(
-                    0.43 *
-                    static_cast<double>(shifted)) +
-                2.5 * std::cos(
-                    0.17 *
-                    static_cast<double>(shifted)));
-    }
-
-    for (std::size_t frame = 0;
-         frame < 32u;
-         ++frame) {
-
-        for (std::size_t bin = 0;
-             bin <
-                ToneMatchAnalyzer::
-                    kTemporalCurveBins;
-             ++bin) {
-
-            const double position =
-                static_cast<double>(bin) /
-                static_cast<double>(
-                    ToneMatchAnalyzer::
-                        kTemporalCurveBins -
-                    1u);
-
-            const double evolvingContent =
-                4.0 *
-                    std::sin(
-                        0.31 *
-                            static_cast<double>(
-                                frame) +
-                        9.0 * position) +
-                2.0 *
-                    std::cos(
-                        0.17 *
-                            static_cast<double>(
-                                frame) -
-                        5.0 * position);
-
-            const double tonalDelta =
-                3.0 *
-                std::exp(
-                    -0.5 *
-                    std::pow(
-                        (position - 0.35) /
-                            0.08,
-                        2.0)) -
-                2.0 *
-                std::exp(
-                    -0.5 *
-                    std::pow(
-                        (position - 0.70) /
-                            0.10,
-                        2.0));
-
-            target.temporalDb[
-                frame *
-                    ToneMatchAnalyzer::
-                        kTemporalCurveBins +
-                bin] =
-                static_cast<float>(
-                    evolvingContent);
-
-            reference.temporalDb[
-                frame *
-                    ToneMatchAnalyzer::
-                        kTemporalCurveBins +
-                bin] =
-                static_cast<float>(
-                    evolvingContent +
-                    tonalDelta);
-        }
-    }
-
-    const auto profile =
-        ToneMatchAnalyzer::makeProfile(
-            reference,
-            target);
-
-    BF_REQUIRE(profile.valid);
-    BF_REQUIRE(profile.firValid);
-
-    BF_REQUIRE(
-        responseDb(
-            profile,
-            48000.0,
-            250.0) >
-        1.0);
-}
-
 void verifyMeasuredAnalyzerSeparatesLevelFromTone() {
     auto quiet =
         std::make_unique<ToneMatchAnalyzer>();
@@ -853,10 +776,10 @@ void verifyMeasuredAnalyzerSeparatesLevelFromTone() {
 int main() {
     verifyDistanceImproves();
     verifyNarrowSpikeIsRejected();
+    verifyHighRangeCorrectionIsNotArtificiallyCapped();
     verifySubBoostProtection();
     verifyAbsoluteLevelIsNotTone();
     verifyAnalyzerHasNoUpperDbCeiling();
-    verifyPairedTemporalDifference();
     verifyMeasuredAnalyzerSeparatesLevelFromTone();
 
     std::cout

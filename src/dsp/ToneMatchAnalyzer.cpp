@@ -13,8 +13,6 @@ constexpr double kPi =
     3.141592653589793238462643383279502884;
 
 constexpr double kMinimumDb = -120.0;
-constexpr double kMaximumMatchDb = 12.0;
-
 double clampFinite(
     double value,
     double fallback) noexcept {
@@ -41,11 +39,8 @@ void ToneMatchAnalyzer::prepare(
 void ToneMatchAnalyzer::reset() noexcept {
     fifo_.fill(0.0);
     powerSum_.fill(0.0L);
+    curvePowerSum_.fill(0.0L);
     meanDb_.fill(0.0);
-    temporalDb_.fill(0.0f);
-    temporalFrameCount_ = 0;
-    alignmentLevelDb_.fill(0.0f);
-    alignmentFrameCount_ = 0;
     fifoFill_ = 0;
     frameCount_ = 0;
 }
@@ -193,19 +188,6 @@ void ToneMatchAnalyzer::processFrame() noexcept {
     if (rms < 1.0e-7)
         return;
 
-    if (alignmentFrameCount_ <
-        kAlignmentFrameSlots) {
-
-        alignmentLevelDb_[
-            alignmentFrameCount_++] =
-            static_cast<float>(
-                20.0 *
-                std::log10(
-                    std::max(
-                        rms,
-                        1.0e-12)));
-    }
-
     for (std::size_t i = 0;
          i < kAnalysisFftSize;
          ++i) {
@@ -256,9 +238,6 @@ void ToneMatchAnalyzer::processFrame() noexcept {
                 magnitude * magnitude);
     }
 
-    std::array<double, kCurveBins>
-        frameDb {};
-
     const double logMinimum =
         std::log(kCurveMinimumHz);
 
@@ -268,8 +247,10 @@ void ToneMatchAnalyzer::processFrame() noexcept {
                 kCurveMaximumHz,
                 sampleRate_ * 0.45));
 
-    double framePeakDb = kMinimumDb;
-
+    // Classic whole-program spectral matching: every accepted analysis frame
+    // contributes linear spectral power. Reference and Target are each
+    // integrated over their complete capture/file duration. Only after the
+    // complete spectra exist do we form Reference - Target in dB.
     for (std::size_t i = 0;
          i < kCurveBins;
          ++i) {
@@ -305,147 +286,27 @@ void ToneMatchAnalyzer::processFrame() noexcept {
 
         const double fraction =
             exactBin -
-            static_cast<double>(index0);
+            static_cast<double>(
+                index0);
 
-        const double m0 =
-            std::max(
-                std::abs(spectrum[index0]),
-                1.0e-12);
+        const double p0 =
+            std::norm(
+                spectrum[index0]);
 
-        const double m1 =
-            std::max(
-                std::abs(spectrum[index1]),
-                1.0e-12);
+        const double p1 =
+            std::norm(
+                spectrum[index1]);
 
-        const double db0 =
-            20.0 * std::log10(m0);
-
-        const double db1 =
-            20.0 * std::log10(m1);
-
-        const double db =
-            db0 +
-            (db1 - db0) *
+        const double power =
+            p0 +
+            (p1 - p0) *
                 fraction;
 
-        frameDb[i] = db;
-        framePeakDb =
-            std::max(
-                framePeakDb,
-                db);
-    }
-
-    // Separate level from tone on every frame before temporal averaging.
-    // This is the #67 baseline that measured best on real program material.
-    constexpr double kFrameActivityRangeDb = 60.0;
-
-    long double activeSum = 0.0L;
-    std::size_t activeCount = 0u;
-
-    for (const double db : frameDb) {
-        if (db >=
-            framePeakDb -
-                kFrameActivityRangeDb) {
-            activeSum += db;
-            ++activeCount;
-        }
-    }
-
-    if (activeCount == 0u)
-        return;
-
-    const double frameLevelDb =
-        static_cast<double>(
-            activeSum /
+        curvePowerSum_[i] +=
             static_cast<long double>(
-                activeCount));
-
-    const std::size_t nextCount =
-        frameCount_ + 1u;
-
-    std::array<double, kCurveBins>
-        normalizedFrame {};
-
-    for (std::size_t i = 0;
-         i < kCurveBins;
-         ++i) {
-
-        const double normalized =
-            std::max(
-                frameDb[i],
-                framePeakDb -
-                    kFrameActivityRangeDb) -
-            frameLevelDb;
-
-        normalizedFrame[i] =
-            normalized;
-
-        double sample =
-            normalized;
-
-        // Online robustification after a few observations. This is a
-        // winsorized mean: broad persistent tonal differences survive, while
-        // one-off note/resonance spikes cannot dominate a curve bin.
-        if (frameCount_ >= 4u) {
-            sample =
-                std::clamp(
-                    sample,
-                    meanDb_[i] - 12.0,
-                    meanDb_[i] + 12.0);
-        }
-
-        meanDb_[i] +=
-            (sample - meanDb_[i]) /
-            static_cast<double>(
-                nextCount);
-    }
-
-    if (temporalFrameCount_ <
-        kTemporalFrameSlots) {
-
-        const std::size_t frameIndex =
-            temporalFrameCount_;
-
-        for (std::size_t i = 0;
-             i < kTemporalCurveBins;
-             ++i) {
-
-            const double source =
-                static_cast<double>(i) *
-                static_cast<double>(
-                    kCurveBins - 1u) /
-                static_cast<double>(
-                    kTemporalCurveBins - 1u);
-
-            const std::size_t index0 =
-                static_cast<std::size_t>(
-                    std::floor(source));
-
-            const std::size_t index1 =
-                std::min(
-                    index0 + 1u,
-                    kCurveBins - 1u);
-
-            const double fraction =
-                source -
-                static_cast<double>(
-                    index0);
-
-            const double value =
-                normalizedFrame[index0] +
-                (normalizedFrame[index1] -
-                 normalizedFrame[index0]) *
-                    fraction;
-
-            temporalDb_[
-                frameIndex *
-                    kTemporalCurveBins +
-                i] =
-                static_cast<float>(
-                    value);
-        }
-
-        ++temporalFrameCount_;
+                std::max(
+                    power,
+                    1.0e-24));
     }
 
     ++frameCount_;
@@ -497,10 +358,37 @@ double ToneMatchAnalyzer::interpolatedMagnitudeDb(
         static_cast<double>(
             index0);
 
+    const long double divisor =
+        static_cast<long double>(
+            frameCount_);
+
+    const double p0 =
+        static_cast<double>(
+            curvePowerSum_[index0] /
+            divisor);
+
+    const double p1 =
+        static_cast<double>(
+            curvePowerSum_[index1] /
+            divisor);
+
+    const double db0 =
+        10.0 *
+        std::log10(
+            std::max(
+                p0,
+                1.0e-24));
+
+    const double db1 =
+        10.0 *
+        std::log10(
+            std::max(
+                p1,
+                1.0e-24));
+
     return
-        meanDb_[index0] +
-        (meanDb_[index1] -
-         meanDb_[index0]) *
+        db0 +
+        (db1 - db0) *
             fraction;
 }
 
@@ -508,9 +396,30 @@ double ToneMatchAnalyzer::peakMagnitudeDb() const noexcept {
     if (frameCount_ == 0)
         return kMinimumDb;
 
-    return *std::max_element(
-        meanDb_.begin(),
-        meanDb_.end());
+    double maximum = kMinimumDb;
+
+    const long double divisor =
+        static_cast<long double>(
+            frameCount_);
+
+    for (const long double sum :
+         curvePowerSum_) {
+
+        const double power =
+            static_cast<double>(
+                sum / divisor);
+
+        maximum =
+            std::max(
+                maximum,
+                10.0 *
+                    std::log10(
+                        std::max(
+                            power,
+                            1.0e-24)));
+    }
+
+    return maximum;
 }
 
 ToneMatchSpectrumSnapshot
@@ -540,20 +449,23 @@ ToneMatchAnalyzer::snapshot() const noexcept {
     }
 
     result.hasLogCurve = true;
-    result.meanDb = meanDb_;
-    result.hasTemporalCurve =
-        temporalFrameCount_ >= 4u;
-    result.temporalFrameCount =
-        static_cast<std::uint32_t>(
-            temporalFrameCount_);
-    result.temporalDb = temporalDb_;
-    result.hasAlignmentFingerprint =
-        alignmentFrameCount_ >= 8u;
-    result.alignmentFrameCount =
-        static_cast<std::uint32_t>(
-            alignmentFrameCount_);
-    result.alignmentLevelDb =
-        alignmentLevelDb_;
+
+    for (std::size_t i = 0;
+         i < kCurveBins;
+         ++i) {
+
+        const double power =
+            static_cast<double>(
+                curvePowerSum_[i] /
+                divisor);
+
+        result.meanDb[i] =
+            10.0 *
+            std::log10(
+                std::max(
+                    power,
+                    1.0e-24));
+    }
 
     return result;
 }
@@ -1324,311 +1236,12 @@ ToneMatchAnalyzer::makeProfile(
 
     constexpr double kMinimumMatchHz = 30.0;
     constexpr double kMaximumMatchHz = 12000.0;
-    constexpr double kMaximumCorrectionDb = 12.0;
+    constexpr double kMaximumCorrectionDb = 24.0;
 
     const double maximumMatchHz =
         std::min(
             kMaximumMatchHz,
             sampleRate * 0.45);
-
-    std::array<double, kTemporalCurveBins>
-        pairedDifference {};
-
-    bool usePairedTemporal =
-        reference.hasTemporalCurve &&
-        target.hasTemporalCurve &&
-        reference.temporalFrameCount >= 4u &&
-        target.temporalFrameCount >= 4u;
-
-    if (usePairedTemporal) {
-        const int referenceCount =
-            static_cast<int>(
-                reference.temporalFrameCount);
-
-        const int targetCount =
-            static_cast<int>(
-                target.temporalFrameCount);
-
-        int bestShift = 0;
-
-        const bool canAlign =
-            reference.hasAlignmentFingerprint &&
-            target.hasAlignmentFingerprint &&
-            reference.alignmentFrameCount >= 8u &&
-            target.alignmentFrameCount >= 8u;
-
-        if (canAlign) {
-            const int referenceAlignmentCount =
-                static_cast<int>(
-                    reference.alignmentFrameCount);
-
-            const int targetAlignmentCount =
-                static_cast<int>(
-                    target.alignmentFrameCount);
-
-            double bestScore =
-                std::numeric_limits<double>::
-                    infinity();
-
-            const int maximumShift =
-                std::min(
-                    64,
-                    std::max(
-                        referenceAlignmentCount,
-                        targetAlignmentCount) -
-                        8);
-
-            for (int shift = -maximumShift;
-                 shift <= maximumShift;
-                 ++shift) {
-
-                long double meanReference = 0.0L;
-                long double meanTarget = 0.0L;
-                std::size_t overlap = 0u;
-
-                for (int targetFrame = 0;
-                     targetFrame <
-                        targetAlignmentCount;
-                     ++targetFrame) {
-
-                    const int referenceFrame =
-                        targetFrame + shift;
-
-                    if (referenceFrame < 0 ||
-                        referenceFrame >=
-                            referenceAlignmentCount) {
-                        continue;
-                    }
-
-                    meanReference +=
-                        reference.alignmentLevelDb[
-                            static_cast<std::size_t>(
-                                referenceFrame)];
-
-                    meanTarget +=
-                        target.alignmentLevelDb[
-                            static_cast<std::size_t>(
-                                targetFrame)];
-
-                    ++overlap;
-                }
-
-                if (overlap < 8u)
-                    continue;
-
-                const double referenceOffset =
-                    static_cast<double>(
-                        meanReference /
-                        static_cast<long double>(
-                            overlap));
-
-                const double targetOffset =
-                    static_cast<double>(
-                        meanTarget /
-                        static_cast<long double>(
-                            overlap));
-
-                long double levelScore = 0.0L;
-                long double transientScore = 0.0L;
-                std::size_t transientCount = 0u;
-
-                bool havePrevious = false;
-                double previousReference = 0.0;
-                double previousTarget = 0.0;
-
-                for (int targetFrame = 0;
-                     targetFrame <
-                        targetAlignmentCount;
-                     ++targetFrame) {
-
-                    const int referenceFrame =
-                        targetFrame + shift;
-
-                    if (referenceFrame < 0 ||
-                        referenceFrame >=
-                            referenceAlignmentCount) {
-                        continue;
-                    }
-
-                    const double r =
-                        static_cast<double>(
-                            reference.alignmentLevelDb[
-                                static_cast<std::size_t>(
-                                    referenceFrame)]) -
-                        referenceOffset;
-
-                    const double t =
-                        static_cast<double>(
-                            target.alignmentLevelDb[
-                                static_cast<std::size_t>(
-                                    targetFrame)]) -
-                        targetOffset;
-
-                    const double levelDifference =
-                        r - t;
-
-                    levelScore +=
-                        levelDifference *
-                        levelDifference;
-
-                    if (havePrevious) {
-                        const double referenceDelta =
-                            r - previousReference;
-
-                        const double targetDelta =
-                            t - previousTarget;
-
-                        const double transientDifference =
-                            referenceDelta -
-                            targetDelta;
-
-                        transientScore +=
-                            transientDifference *
-                            transientDifference;
-
-                        ++transientCount;
-                    }
-
-                    previousReference = r;
-                    previousTarget = t;
-                    havePrevious = true;
-                }
-
-                const double normalizedLevel =
-                    static_cast<double>(
-                        levelScore /
-                        static_cast<long double>(
-                            overlap));
-
-                const double normalizedTransient =
-                    transientCount > 0u
-                        ? static_cast<double>(
-                              transientScore /
-                              static_cast<long double>(
-                                  transientCount))
-                        : normalizedLevel;
-
-                // Transient shape is the stronger timing cue; normalized
-                // broadband level adds stability without depending on EQ.
-                const double score =
-                    0.35 * normalizedLevel +
-                    0.65 * normalizedTransient;
-
-                if (score < bestScore) {
-                    bestScore = score;
-                    bestShift = shift;
-                }
-            }
-        }
-
-        for (std::size_t bin = 0;
-             bin < kTemporalCurveBins;
-             ++bin) {
-
-            std::array<double,
-                kTemporalFrameSlots> differences {};
-
-            std::size_t count = 0u;
-
-            for (int targetFrame = 0;
-                 targetFrame < targetCount;
-                 ++targetFrame) {
-
-                const int referenceFrame =
-                    targetFrame + bestShift;
-
-                if (referenceFrame < 0 ||
-                    referenceFrame >=
-                        referenceCount) {
-                    continue;
-                }
-
-                differences[count++] =
-                    static_cast<double>(
-                        reference.temporalDb[
-                            static_cast<std::size_t>(
-                                referenceFrame) *
-                                kTemporalCurveBins +
-                            bin]) -
-                    static_cast<double>(
-                        target.temporalDb[
-                            static_cast<std::size_t>(
-                                targetFrame) *
-                                kTemporalCurveBins +
-                            bin]);
-
-                if (count >=
-                    differences.size()) {
-                    break;
-                }
-            }
-
-            if (count < 4u) {
-                usePairedTemporal = false;
-                break;
-            }
-
-            auto middle =
-                differences.begin() +
-                static_cast<std::ptrdiff_t>(
-                    count / 2u);
-
-            std::nth_element(
-                differences.begin(),
-                middle,
-                differences.begin() +
-                    static_cast<std::ptrdiff_t>(
-                        count));
-
-            pairedDifference[bin] =
-                *middle;
-        }
-    }
-
-    const auto pairedDifferenceAt =
-        [&](double frequency) noexcept {
-
-            const double position =
-                (std::log(
-                    std::clamp(
-                        frequency,
-                        kMinimumMatchHz,
-                        maximumMatchHz)) -
-                 std::log(
-                     kMinimumMatchHz)) /
-                (std::log(
-                     maximumMatchHz) -
-                 std::log(
-                     kMinimumMatchHz));
-
-            const double exactIndex =
-                position *
-                static_cast<double>(
-                    kTemporalCurveBins - 1u);
-
-            const std::size_t index0 =
-                std::min(
-                    static_cast<std::size_t>(
-                        std::floor(
-                            exactIndex)),
-                    kTemporalCurveBins - 1u);
-
-            const std::size_t index1 =
-                std::min(
-                    index0 + 1u,
-                    kTemporalCurveBins - 1u);
-
-            const double fraction =
-                exactIndex -
-                static_cast<double>(
-                    index0);
-
-            return
-                pairedDifference[index0] +
-                (pairedDifference[index1] -
-                 pairedDifference[index0]) *
-                    fraction;
-        };
 
     // Remove only a broadband level offset. The remaining curve is the actual
     // spectral shape difference we want the EQ to realize.
@@ -1659,15 +1272,12 @@ ToneMatchAnalyzer::makeProfile(
                     position);
 
         const double difference =
-            usePairedTemporal
-                ? pairedDifferenceAt(
-                    frequency)
-                : (snapshotMagnitudeDb(
-                       reference,
-                       frequency) -
-                   snapshotMagnitudeDb(
-                       target,
-                       frequency));
+            snapshotMagnitudeDb(
+                reference,
+                frequency) -
+            snapshotMagnitudeDb(
+                target,
+                frequency);
 
         if (std::isfinite(difference)) {
             offsetSum += difference;
@@ -1707,14 +1317,12 @@ ToneMatchAnalyzer::makeProfile(
             const auto differenceAt =
                 [&](double f) noexcept {
                     return
-                        (usePairedTemporal
-                             ? pairedDifferenceAt(f)
-                             : (snapshotMagnitudeDb(
-                                    reference,
-                                    f) -
-                                snapshotMagnitudeDb(
-                                    target,
-                                    f))) -
+                        snapshotMagnitudeDb(
+                            reference,
+                            f) -
+                        snapshotMagnitudeDb(
+                            target,
+                            f) -
                         levelOffsetDb;
                 };
 
@@ -1763,15 +1371,12 @@ ToneMatchAnalyzer::makeProfile(
                 kMinimumMatchHz) {
 
             const double edge =
-                (usePairedTemporal
-                     ? pairedDifferenceAt(
-                           kMinimumMatchHz)
-                     : (snapshotMagnitudeDb(
-                            reference,
-                            kMinimumMatchHz) -
-                        snapshotMagnitudeDb(
-                            target,
-                            kMinimumMatchHz))) -
+                snapshotMagnitudeDb(
+                    reference,
+                    kMinimumMatchHz) -
+                snapshotMagnitudeDb(
+                    target,
+                    kMinimumMatchHz) -
                 levelOffsetDb;
 
             correctionDb =
@@ -1789,15 +1394,12 @@ ToneMatchAnalyzer::makeProfile(
 
                 const double edge =
                     std::clamp(
-                        (usePairedTemporal
-                             ? pairedDifferenceAt(
-                                   maximumMatchHz)
-                             : (snapshotMagnitudeDb(
-                                    reference,
-                                    maximumMatchHz) -
-                                snapshotMagnitudeDb(
-                                    target,
-                                    maximumMatchHz))) -
+                        snapshotMagnitudeDb(
+                            reference,
+                            maximumMatchHz) -
+                        snapshotMagnitudeDb(
+                            target,
+                            maximumMatchHz) -
                         levelOffsetDb,
                         -kMaximumCorrectionDb,
                         kMaximumCorrectionDb);

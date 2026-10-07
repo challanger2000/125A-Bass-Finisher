@@ -9,10 +9,6 @@
 
 namespace HighGainGuitarFinisher::dsp {
 
-inline constexpr std::size_t kToneMatchTemporalCurveBins = 32;
-inline constexpr std::size_t kToneMatchTemporalFrameSlots = 48;
-inline constexpr std::size_t kToneMatchAlignmentFrameSlots = 128;
-
 struct ToneMatchSpectrumSnapshot {
     double sampleRate {44100.0};
     std::uint64_t frameCount {0};
@@ -25,24 +21,6 @@ struct ToneMatchSpectrumSnapshot {
     // a logarithmic 30 Hz .. 12 kHz grid. This is the primary MATCH curve.
     bool hasLogCurve {false};
     std::array<double, 512> meanDb {};
-
-    // Short ordered tonal history used only for paired-frame matching when
-    // reference and target represent the same musical performance. It is not
-    // required for backwards compatibility; meanDb remains the fallback.
-    bool hasTemporalCurve {false};
-    std::uint32_t temporalFrameCount {0};
-    std::array<float,
-        kToneMatchTemporalFrameSlots *
-        kToneMatchTemporalCurveBins> temporalDb {};
-
-    // Broadband time fingerprint for robust offset estimation. Kept separate
-    // from the tonal curve so alignment is not inferred from a handful of EQ
-    // bins. RMS level is sufficient here because only relative temporal shape
-    // and first differences are compared.
-    bool hasAlignmentFingerprint {false};
-    std::uint32_t alignmentFrameCount {0};
-    std::array<float,
-        kToneMatchAlignmentFrameSlots> alignmentLevelDb {};
 };
 
 class ToneMatchAnalyzer {
@@ -55,12 +33,6 @@ public:
     static constexpr std::size_t kAnalysisFftSize = 16384;
     static constexpr std::size_t kHopSize = kAnalysisFftSize / 2;
     static constexpr std::size_t kCurveBins = 512;
-    static constexpr std::size_t kTemporalCurveBins =
-        kToneMatchTemporalCurveBins;
-    static constexpr std::size_t kTemporalFrameSlots =
-        kToneMatchTemporalFrameSlots;
-    static constexpr std::size_t kAlignmentFrameSlots =
-        kToneMatchAlignmentFrameSlots;
     static constexpr double kCurveMinimumHz = 30.0;
     static constexpr double kCurveMaximumHz = 12000.0;
 
@@ -104,13 +76,8 @@ private:
     std::size_t fifoFill_ {0};
 
     std::array<long double, kSpectrumBins> powerSum_ {};
+    std::array<long double, kCurveBins> curvePowerSum_ {};
     std::array<double, kCurveBins> meanDb_ {};
-    std::array<float,
-        kTemporalFrameSlots * kTemporalCurveBins> temporalDb_ {};
-    std::size_t temporalFrameCount_ {0};
-    std::array<float,
-        kAlignmentFrameSlots> alignmentLevelDb_ {};
-    std::size_t alignmentFrameCount_ {0};
     std::size_t frameCount_ {0};
 };
 
