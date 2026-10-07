@@ -606,7 +606,7 @@ double profileFitError(
 
     constexpr std::size_t kFitPointCount = 128u;
     constexpr double kMinimumFitHz = 30.0;
-    constexpr double kMaximumFitHz = 3500.0;
+    constexpr double kMaximumFitHz = 10000.0;
 
     const double maximumFrequency =
         std::min(
@@ -654,22 +654,47 @@ double profileFitError(
                 kFitPointCount));
 }
 
+double maximumBoostAt(double frequencyHz) noexcept {
+    if (frequencyHz < 50.0)
+        return 1.5;
+    if (frequencyHz < 65.0)
+        return 2.0;
+    if (frequencyHz < 80.0)
+        return 3.0;
+    if (frequencyHz < 120.0)
+        return 5.5;
+    if (frequencyHz < 7000.0)
+        return 8.0;
+    return 6.0;
+}
+
+double maximumCutAt(double frequencyHz) noexcept {
+    if (frequencyHz < 50.0)
+        return 4.0;
+    if (frequencyHz < 65.0)
+        return 5.0;
+    if (frequencyHz < 80.0)
+        return 6.0;
+    if (frequencyHz < 7000.0)
+        return 8.0;
+    return 7.0;
+}
+
 template <typename DesiredCurve>
 void refineProfileGains(
     ToneMatchProfile& profile,
     double sampleRate,
     const DesiredCurve& desiredAt) noexcept {
 
-    // Offline/controller-side coordinate descent. The realtime topology stays
-    // exactly the same; this only chooses gains that account for the actual
-    // summed response of the overlapping shelves and peaking filters.
     constexpr std::array<double, 6> steps {
         2.0, 1.0, 0.5, 0.25, 0.125, 0.0625
     };
 
     auto optimizeGain =
         [&](double& gain,
-            double step) noexcept {
+            double step,
+            double minimum,
+            double maximum) noexcept {
 
             const double original = gain;
             double bestGain = original;
@@ -686,8 +711,8 @@ void refineProfileGains(
                     std::clamp(
                         original +
                             direction * step,
-                        -kMaximumMatchDb,
-                        kMaximumMatchDb);
+                        minimum,
+                        maximum);
 
                 const double error =
                     profileFitError(
@@ -704,109 +729,137 @@ void refineProfileGains(
             gain = bestGain;
         };
 
-    const auto optimizeAllGains =
-        [&]() noexcept {
+    for (const double step : steps) {
+        optimizeGain(
+            profile.lowShelfGainDb,
+            step,
+            -6.0,
+            4.0);
 
-            for (const double step :
-                 steps) {
+        for (auto& peak :
+             profile.peaks) {
+            optimizeGain(
+                peak.gainDb,
+                step,
+                -maximumCutAt(
+                    peak.frequencyHz),
+                maximumBoostAt(
+                    peak.frequencyHz));
+        }
 
-                optimizeGain(
-                    profile.lowShelfGainDb,
-                    step);
+        optimizeGain(
+            profile.highShelfGainDb,
+            step,
+            -6.0,
+            6.0);
+    }
+}
 
-                for (auto& peak :
-                     profile.peaks) {
-                    optimizeGain(
-                        peak.gainDb,
-                        step);
-                }
+template <typename DesiredCurve>
+void refineProfileShape(
+    ToneMatchProfile& profile,
+    double sampleRate,
+    const DesiredCurve& desiredAt,
+    double maximumFrequency) noexcept {
 
-                optimizeGain(
-                    profile.highShelfGainDb,
-                    step);
-            }
-        };
+    constexpr std::array<double, 3> frequencyRatios {
+        1.20, 1.10, 1.05
+    };
 
-    optimizeAllGains();
+    constexpr std::array<double, 3> qRatios {
+        1.40, 1.20, 1.10
+    };
 
-    // The broad shelf corners are part of the spectral fit, not a timbral
-    // preference. Keep them within narrow guitar-safe ranges and optimize
-    // them offline so edge mismatches do not have to be approximated by
-    // neighbouring peaking bands.
-    const auto optimizeFrequency =
-        [&](double& frequency,
-            double minimum,
-            double maximum,
-            const auto& frequencySteps) noexcept {
+    for (std::size_t pass = 0;
+         pass < frequencyRatios.size();
+         ++pass) {
 
-            for (const double step :
-                 frequencySteps) {
+        for (auto& peak :
+             profile.peaks) {
 
-                const double original =
-                    frequency;
+            double bestError =
+                profileFitError(
+                    profile,
+                    sampleRate,
+                    desiredAt);
 
-                double bestFrequency =
-                    original;
+            const double originalFrequency =
+                peak.frequencyHz;
 
-                double bestError =
+            const double ratio =
+                frequencyRatios[pass];
+
+            for (const double candidate :
+                 {
+                    originalFrequency / ratio,
+                    originalFrequency * ratio
+                 }) {
+
+                peak.frequencyHz =
+                    std::clamp(
+                        candidate,
+                        35.0,
+                        maximumFrequency);
+
+                const double error =
                     profileFitError(
                         profile,
                         sampleRate,
                         desiredAt);
 
-                for (const double direction :
-                     {-1.0, 1.0}) {
-
-                    frequency =
-                        std::clamp(
-                            original +
-                                direction * step,
-                            minimum,
-                            maximum);
-
-                    const double error =
-                        profileFitError(
-                            profile,
-                            sampleRate,
-                            desiredAt);
-
-                    if (error < bestError) {
-                        bestError = error;
-                        bestFrequency =
-                            frequency;
-                    }
+                if (error < bestError) {
+                    bestError = error;
+                } else {
+                    peak.frequencyHz =
+                        originalFrequency;
                 }
-
-                frequency =
-                    bestFrequency;
             }
-        };
 
-    static constexpr std::array<double, 5>
-        lowShelfSteps {
-            10.0, 5.0, 2.5, 1.25, 0.625
-        };
+            const double originalQ =
+                peak.q;
 
-    static constexpr std::array<double, 5>
-        highShelfSteps {
-            500.0, 250.0, 125.0, 62.5, 31.25
-        };
+            const double qRatio =
+                qRatios[pass];
 
-    optimizeFrequency(
-        profile.lowShelfFrequencyHz,
-        40.0,
-        75.0,
-        lowShelfSteps);
+            for (const double candidate :
+                 {
+                    originalQ / qRatio,
+                    originalQ * qRatio
+                 }) {
 
-    optimizeFrequency(
-        profile.highShelfFrequencyHz,
-        2500.0,
-        4500.0,
-        highShelfSteps);
+                peak.q =
+                    std::clamp(
+                        candidate,
+                        0.35,
+                        6.0);
 
-    // Frequency moves change overlap with the adjacent bands, so give the
-    // gain solver one final pass at the new shelf positions.
-    optimizeAllGains();
+                const double error =
+                    profileFitError(
+                        profile,
+                        sampleRate,
+                        desiredAt);
+
+                if (error < bestError) {
+                    bestError = error;
+                } else {
+                    peak.q = originalQ;
+                }
+            }
+
+            peak.gainDb =
+                std::clamp(
+                    peak.gainDb,
+                    -maximumCutAt(
+                        peak.frequencyHz),
+                    maximumBoostAt(
+                        peak.frequencyHz));
+        }
+
+        refineProfileGains(
+            profile,
+            sampleRate,
+            desiredAt);
+    }
 }
 
 double snapshotLevelOffsetDb(
@@ -818,7 +871,7 @@ double snapshotLevelOffsetDb(
     // an otherwise identical reference recorded, for example, 6 dB louder
     // from turning into a broadband +6 dB Tone Match profile.
     constexpr double kMinimumFrequencyHz = 30.0;
-    constexpr double kMaximumFrequencyHz = 3500.0;
+    constexpr double kMaximumFrequencyHz = 10000.0;
 
     const double referencePower =
         snapshotBandPower(
@@ -866,40 +919,13 @@ ToneMatchAnalyzer::makeProfile(
         return profile;
     }
 
-    static constexpr std::array<double, kToneMatchPeakCount> centers {
-        35.0, 50.0, 65.0, 82.0,
-        105.0, 135.0, 175.0, 225.0,
-        300.0, 400.0, 550.0, 750.0,
-        1050.0, 1500.0, 2200.0, 3200.0
-    };
+    const double sampleRate =
+        target.sampleRate;
 
-    static constexpr std::array<double, kToneMatchPeakCount> qValues {
-        0.70, 0.75, 0.80, 0.85,
-        0.90, 0.95, 1.00, 1.00,
-        1.00, 1.00, 1.00, 1.05,
-        1.10, 1.10, 1.05, 0.95
-    };
-
-    static constexpr std::array<double, kToneMatchPeakCount> zoneWeight {
-        1.00, 1.00, 1.00, 1.00,
-        1.00, 1.00, 1.00, 1.00,
-        1.00, 1.00, 1.00, 1.00,
-        1.00, 1.00, 1.00, 1.00
-    };
-
-    static constexpr std::array<double, kToneMatchPeakCount> maximumBoostDb {
-        1.5, 2.0, 3.0, 5.5,
-        6.0, 6.0, 6.0, 6.0,
-        6.0, 6.0, 6.0, 6.0,
-        6.0, 6.0, 5.5, 5.0
-    };
-
-    static constexpr std::array<double, kToneMatchPeakCount> maximumCutDb {
-        4.0, 5.0, 6.0, 6.0,
-        6.5, 6.5, 6.5, 6.5,
-        6.5, 6.5, 6.5, 6.5,
-        6.5, 6.5, 6.0, 5.5
-    };
+    const double maximumFrequency =
+        std::min(
+            10000.0,
+            sampleRate * 0.45);
 
     const double referencePeakDb =
         snapshotPeakDb(reference);
@@ -912,7 +938,8 @@ ToneMatchAnalyzer::makeProfile(
             reference,
             target);
 
-    constexpr double kActivityFloorDb = 48.0;
+    constexpr double kActivityFloorDb =
+        48.0;
 
     const auto rawDifferenceAt =
         [&](double frequency) noexcept {
@@ -951,175 +978,282 @@ ToneMatchAnalyzer::makeProfile(
                 : 0.0;
         };
 
-    std::array<double, kToneMatchPeakCount>
-        zoneDifference {};
-
-    for (std::size_t i = 0;
-         i < centers.size();
-         ++i) {
-
-        const double center =
-            centers[i];
-
-        // First reduce single-bin/narrow-feature influence by measuring a
-        // local log-frequency neighbourhood. No dB clamp occurs here.
-        zoneDifference[i] =
-            0.15 * rawDifferenceAt(center / 1.30) +
-            0.20 * rawDifferenceAt(center / 1.14) +
-            0.30 * rawDifferenceAt(center) +
-            0.20 * rawDifferenceAt(center * 1.14) +
-            0.15 * rawDifferenceAt(center * 1.30);
-    }
-
-    // The five-point log-frequency neighbourhood above is the deliberate
-    // anti-resonance smoothing stage. Do not smooth the 16-zone curve again:
-    // a second broad blur made MATCH stop short of the reference even at 100%.
-    // Protection below is now limited to explicit safety bounds.
-
-    std::array<double, kToneMatchPeakCount>
-        protectedDesired {};
-
-    for (std::size_t i = 0;
-         i < protectedDesired.size();
-         ++i) {
-
-        protectedDesired[i] =
-            std::clamp(
-                zoneDifference[i] *
-                    zoneWeight[i],
-                -maximumCutDb[i],
-                maximumBoostDb[i]);
-    }
-
+    // This is the actual MATCH target: reference spectrum minus target
+    // spectrum. Only a small local log-frequency average is applied so a
+    // single FFT bin or narrow accidental resonance is not copied literally.
     const auto desiredAt =
         [&](double frequency) noexcept {
 
-            const double safeFrequency =
-                std::max(
+            const double f =
+                std::clamp(
                     frequency,
-                    centers.front());
+                    35.0,
+                    maximumFrequency);
 
-            if (safeFrequency <=
-                centers.front()) {
-                return
-                    protectedDesired.front();
-            }
-
-            if (safeFrequency >=
-                centers.back()) {
-                return
-                    protectedDesired.back();
-            }
-
-            for (std::size_t i = 0;
-                 i + 1 < centers.size();
-                 ++i) {
-
-                if (safeFrequency >
-                    centers[i + 1]) {
-                    continue;
-                }
-
-                const double logA =
-                    std::log(
-                        centers[i]);
-
-                const double logB =
-                    std::log(
-                        centers[i + 1]);
-
-                const double t =
-                    std::clamp(
-                        (std::log(
-                             safeFrequency) -
-                         logA) /
-                            (logB - logA),
-                        0.0,
-                        1.0);
-
-                return
-                    protectedDesired[i] +
-                    (protectedDesired[i + 1] -
-                     protectedDesired[i]) *
-                        t;
-            }
+            const double raw =
+                0.12 * rawDifferenceAt(
+                    f / 1.18) +
+                0.20 * rawDifferenceAt(
+                    f / 1.08) +
+                0.36 * rawDifferenceAt(f) +
+                0.20 * rawDifferenceAt(
+                    f * 1.08) +
+                0.12 * rawDifferenceAt(
+                    f * 1.18);
 
             return
-                protectedDesired.back();
+                std::clamp(
+                    raw,
+                    -maximumCutAt(f),
+                    maximumBoostAt(f));
         };
 
     profile.valid = true;
+
+    // Broad edge correction first. The 16 peaking sections below then fit the
+    // remaining difference wherever the measured curve actually needs them.
     profile.lowShelfFrequencyHz = 55.0;
     profile.lowShelfGainDb =
         std::clamp(
-            0.65 * protectedDesired[0] +
-            0.35 * protectedDesired[1],
-            -5.0,
-            3.0);
-
-    for (std::size_t i = 0;
-         i < centers.size();
-         ++i) {
-
-        auto& peak =
-            profile.peaks[i];
-
-        peak.frequencyHz =
-            centers[i];
-
-        peak.q =
-            qValues[i];
-
-        peak.gainDb =
-            protectedDesired[i];
-    }
-
-    profile.highShelfFrequencyHz = 3200.0;
-    profile.highShelfGainDb =
-        std::clamp(
-            0.35 * protectedDesired[
-                protectedDesired.size() - 2] +
-            0.65 * protectedDesired.back(),
-            -5.0,
+            0.60 * desiredAt(40.0) +
+            0.40 * desiredAt(70.0),
+            -6.0,
             4.0);
 
-    // Solve against the protected smoothed target curve using the actual
-    // combined response of every overlapping shelf and peaking filter.
-    refineProfileGains(
-        profile,
-        target.sampleRate,
-        desiredAt);
-
-    profile.lowShelfGainDb =
-        std::clamp(profile.lowShelfGainDb, -5.0, 3.0);
-
-    for (std::size_t i = 0; i < profile.peaks.size(); ++i) {
-        profile.peaks[i].gainDb =
-            std::clamp(
-                profile.peaks[i].gainDb,
-                -maximumCutDb[i],
-                maximumBoostDb[i]);
-    }
+    profile.highShelfFrequencyHz =
+        std::min(
+            6500.0,
+            maximumFrequency * 0.80);
 
     profile.highShelfGainDb =
-        std::clamp(profile.highShelfGainDb, -5.0, 4.0);
+        std::clamp(
+            0.45 * desiredAt(
+                maximumFrequency * 0.65) +
+            0.55 * desiredAt(
+                maximumFrequency * 0.92),
+            -6.0,
+            6.0);
 
-    constexpr double kMaximumAdjacentStepDb = 3.0;
-
-    for (std::size_t i = 1; i < profile.peaks.size(); ++i) {
-        profile.peaks[i].gainDb =
-            std::clamp(
-                profile.peaks[i].gainDb,
-                profile.peaks[i - 1].gainDb - kMaximumAdjacentStepDb,
-                profile.peaks[i - 1].gainDb + kMaximumAdjacentStepDb);
+    for (auto& peak :
+         profile.peaks) {
+        peak.frequencyHz = 1000.0;
+        peak.q = 1.0;
+        peak.gainDb = 0.0;
     }
 
-    for (std::size_t i = profile.peaks.size() - 1; i > 0; --i) {
-        profile.peaks[i - 1].gainDb =
+    constexpr std::size_t kCandidateCount =
+        96u;
+
+    std::array<double, kCandidateCount>
+        candidateFrequencies {};
+
+    const double logMinimum =
+        std::log(35.0);
+
+    const double logMaximum =
+        std::log(maximumFrequency);
+
+    for (std::size_t i = 0;
+         i < candidateFrequencies.size();
+         ++i) {
+
+        const double position =
+            static_cast<double>(i) /
+            static_cast<double>(
+                candidateFrequencies.size() -
+                1u);
+
+        candidateFrequencies[i] =
+            std::exp(
+                logMinimum +
+                (logMaximum -
+                 logMinimum) *
+                    position);
+    }
+
+    constexpr std::array<double, 8>
+        qCandidates {
+            0.50, 0.70, 0.90, 1.20,
+            1.60, 2.20, 3.20, 4.80
+        };
+
+    constexpr std::array<double, 3>
+        gainScales {
+            0.70, 1.00, 1.25
+        };
+
+    // Greedy residual fit. Each existing peaking section is placed at the
+    // frequency/Q that most reduces the global reference-minus-target error.
+    for (std::size_t band = 0;
+         band < profile.peaks.size();
+         ++band) {
+
+        auto& peak =
+            profile.peaks[band];
+
+        double bestError =
+            profileFitError(
+                profile,
+                sampleRate,
+                desiredAt);
+
+        ToneMatchPeak bestPeak =
+            peak;
+
+        std::array<
+            std::pair<double, std::size_t>,
+            24> strongest {};
+
+        for (auto& item : strongest) {
+            item.first = -1.0;
+            item.second = 0u;
+        }
+
+        for (std::size_t i = 0;
+             i < candidateFrequencies.size();
+             ++i) {
+
+            const double frequency =
+                candidateFrequencies[i];
+
+            const double residual =
+                desiredAt(frequency) -
+                profileResponseDb(
+                    profile,
+                    sampleRate,
+                    frequency);
+
+            const double magnitude =
+                std::abs(residual);
+
+            for (std::size_t slot = 0;
+                 slot < strongest.size();
+                 ++slot) {
+
+                if (magnitude <=
+                    strongest[slot].first) {
+                    continue;
+                }
+
+                for (std::size_t move =
+                         strongest.size() - 1u;
+                     move > slot;
+                     --move) {
+                    strongest[move] =
+                        strongest[move - 1u];
+                }
+
+                strongest[slot] = {
+                    magnitude,
+                    i
+                };
+
+                break;
+            }
+        }
+
+        for (const auto& candidate :
+             strongest) {
+
+            if (candidate.first < 0.0)
+                continue;
+
+            const double frequency =
+                candidateFrequencies[
+                    candidate.second];
+
+            const double residual =
+                desiredAt(frequency) -
+                profileResponseDb(
+                    profile,
+                    sampleRate,
+                    frequency);
+
+            for (const double q :
+                 qCandidates) {
+
+                for (const double scale :
+                     gainScales) {
+
+                    peak.frequencyHz =
+                        frequency;
+
+                    peak.q = q;
+
+                    peak.gainDb =
+                        std::clamp(
+                            residual * scale,
+                            -maximumCutAt(
+                                frequency),
+                            maximumBoostAt(
+                                frequency));
+
+                    const double error =
+                        profileFitError(
+                            profile,
+                            sampleRate,
+                            desiredAt);
+
+                    if (error < bestError) {
+                        bestError = error;
+                        bestPeak = peak;
+                    }
+                }
+            }
+        }
+
+        peak = bestPeak;
+    }
+
+    // Jointly solve overlapping filter gains and then allow each band to move
+    // locally in frequency and Q. This retains the compact 16-band/state
+    // format while fitting the measured difference curve rather than a set of
+    // hard-coded EQ centres.
+    refineProfileGains(
+        profile,
+        sampleRate,
+        desiredAt);
+
+    refineProfileShape(
+        profile,
+        sampleRate,
+        desiredAt,
+        maximumFrequency);
+
+    profile.lowShelfGainDb =
+        std::clamp(
+            profile.lowShelfGainDb,
+            -6.0,
+            4.0);
+
+    profile.highShelfGainDb =
+        std::clamp(
+            profile.highShelfGainDb,
+            -6.0,
+            6.0);
+
+    for (auto& peak :
+         profile.peaks) {
+
+        peak.frequencyHz =
             std::clamp(
-                profile.peaks[i - 1].gainDb,
-                profile.peaks[i].gainDb - kMaximumAdjacentStepDb,
-                profile.peaks[i].gainDb + kMaximumAdjacentStepDb);
+                peak.frequencyHz,
+                35.0,
+                maximumFrequency);
+
+        peak.q =
+            std::clamp(
+                peak.q,
+                0.35,
+                6.0);
+
+        peak.gainDb =
+            std::clamp(
+                peak.gainDb,
+                -maximumCutAt(
+                    peak.frequencyHz),
+                maximumBoostAt(
+                    peak.frequencyHz));
     }
 
     return profile;

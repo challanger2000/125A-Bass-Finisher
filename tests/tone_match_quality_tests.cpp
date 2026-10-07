@@ -11,18 +11,22 @@ using namespace HighGainGuitarFinisher::dsp;
 
 namespace {
 
-constexpr std::array<double, 16> kZones {
+constexpr std::array<double, 22> kZones {
     35.0, 50.0, 65.0, 82.0,
     105.0, 135.0, 175.0, 225.0,
     300.0, 400.0, 550.0, 750.0,
-    1050.0, 1500.0, 2200.0, 3200.0
+    1050.0, 1500.0, 2200.0, 3200.0,
+    4200.0, 5200.0, 6500.0, 7800.0,
+    9000.0, 10000.0
 };
 
-constexpr std::array<double, 16> kWeights {
-    1.00, 1.00, 1.00, 1.00,
-    1.00, 1.00, 1.00, 1.00,
-    1.00, 1.00, 1.00, 1.00,
-    1.00, 1.00, 1.00, 1.00
+constexpr std::array<double, 22> kWeights {
+    1.0, 1.0, 1.0, 1.0,
+    1.0, 1.0, 1.0, 1.0,
+    1.0, 1.0, 1.0, 1.0,
+    1.0, 1.0, 1.0, 1.0,
+    1.0, 1.0, 1.0, 1.0,
+    1.0, 1.0
 };
 
 std::size_t binFor(double sampleRate, double frequency) {
@@ -81,7 +85,9 @@ ToneMatchSpectrumSnapshot makeReference(double sampleRate) {
         const double dbShape =
             4.0 * gaussianLog(frequency, 82.0, 0.24) -
             3.2 * gaussianLog(frequency, 330.0, 0.30) +
-            3.6 * gaussianLog(frequency, 1100.0, 0.27);
+            3.6 * gaussianLog(frequency, 1100.0, 0.27) +
+            3.2 * gaussianLog(frequency, 5200.0, 0.22) -
+            2.4 * gaussianLog(frequency, 8500.0, 0.20);
 
         s.meanPower[i] *=
             std::pow(
@@ -280,8 +286,8 @@ void verifyDistanceImproves() {
 
     // Improvement alone is not enough for a matcher. At 100% the protected
     // solver must land close to the synthetic reference curve.
-    BF_REQUIRE(after < 0.80);
-    BF_REQUIRE(after < before * 0.40);
+    BF_REQUIRE(after < 0.75);
+    BF_REQUIRE(after < before * 0.35);
 }
 
 void verifyNarrowSpikeIsRejected() {
@@ -477,7 +483,7 @@ int main() {
     verifyAnalyzerHasNoUpperDbCeiling();
 
     std::cout
-        << "Bass Finisher protected 16-zone MATCH quality passed\n";
+        << "Bass Finisher adaptive full-band MATCH quality passed\n";
 
     return 0;
 }
