@@ -14,11 +14,11 @@ else()
 endif()
 
 set(BASS_FINISHER_SOURCES
-    BassFinisherIDs.h
-    BassFinisherProcessor.h
-    BassFinisherProcessor.cpp
-    BassFinisherController.h
-    BassFinisherController.cpp
+    HighGainGuitarFinisherIDs.h
+    HighGainGuitarFinisherProcessor.h
+    HighGainGuitarFinisherProcessor.cpp
+    HighGainGuitarFinisherController.h
+    HighGainGuitarFinisherController.cpp
     ToneMatchStateIO.h
     ToneMatchMessage.h
     ToneMatchProfileCodec.h
@@ -89,7 +89,7 @@ endif()
 smtg_target_add_plugin_resources(
     BassFinisher
     RESOURCES
-        ../resource/BassFinisher.uidesc
+        ../resource/HighGainGuitarFinisher.uidesc
         ../resource/125A_Logo_Master_FINAL.svg
 )
 
