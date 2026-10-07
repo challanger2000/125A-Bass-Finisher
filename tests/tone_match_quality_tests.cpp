@@ -284,6 +284,49 @@ void verifyDistanceImproves() {
         << after
         << " dB\n";
 
+    double offset = 0.0;
+    double weightSum = 0.0;
+
+    for (std::size_t i = 0;
+         i < kZones.size();
+         ++i) {
+        offset +=
+            kWeights[i] *
+            (sampleDb(reference, kZones[i]) -
+             sampleDb(target, kZones[i]));
+        weightSum += kWeights[i];
+    }
+
+    offset /= weightSum;
+
+    std::cout << "MATCH residual zones:\n";
+
+    for (std::size_t i = 0;
+         i < kZones.size();
+         ++i) {
+
+        const double desired =
+            (sampleDb(reference, kZones[i]) -
+             sampleDb(target, kZones[i])) -
+            offset;
+
+        const double actual =
+            responseDb(
+                profile,
+                target.sampleRate,
+                kZones[i]);
+
+        const double residual =
+            desired - actual;
+
+        std::cout
+            << "  " << kZones[i]
+            << " Hz: desired=" << desired
+            << " dB actual=" << actual
+            << " dB residual=" << residual
+            << " dB\n";
+    }
+
     // Improvement alone is not enough for a matcher. At 100% the protected
     // solver must land close to the synthetic reference curve.
     BF_REQUIRE(after < 0.25);
