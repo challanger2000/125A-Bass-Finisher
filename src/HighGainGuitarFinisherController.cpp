@@ -4,7 +4,6 @@
 #include "SteelKnob.h"
 #include "SteelPanelView.h"
 #include "dsp/LowCutMapping.h"
-#include "dsp/DelayDivisionMapping.h"
 #include "ToneMatchStateIO.h"
 #include "ToneMatchMessage.h"
 #include "ToneMatchReferenceService.h"
@@ -988,270 +987,60 @@ Controller::setComponentState(
     if (!state)
         return kInvalidArgument;
 
-    IBStreamer stream(
-        state,
-        kLittleEndian);
+    IBStreamer stream(state, kLittleEndian);
 
     int32 version = 0;
-
-    if (!stream.readInt32(
-            version) ||
-        version <
-            kFirstSupportedStateVersion ||
-        version >
-            kStateVersion) {
-
+    if (!stream.readInt32(version) ||
+        version != kStateVersion) {
         return kResultFalse;
     }
 
-    double legacyValues[4] {};
-
-    for (double& value :
-         legacyValues) {
-
-        if (!stream.readDouble(
-                value) ||
-            !std::isfinite(
-                value)) {
-
+    double values[6] {};
+    for (double& value : values) {
+        if (!stream.readDouble(value) ||
+            !std::isfinite(value)) {
             return kResultFalse;
         }
-
-        value =
-            std::clamp(
-                value,
-                0.0,
-                1.0);
-    }
-
-    const double nextFinish =
-        legacyValues[0];
-
-    const double nextRoom =
-        legacyValues[1];
-
-    const double nextOutput =
-        legacyValues[2];
-
-    const double nextBypass =
-        legacyValues[3];
-
-    double nextLowCut = 0.0;
-
-    if (version >= 2) {
-        double lowCut = 0.0;
-
-        if (!stream.readDouble(
-                lowCut) ||
-            !std::isfinite(
-                lowCut)) {
-
-            return kResultFalse;
-        }
-
-        nextLowCut =
-            version >= 4
-                ? std::clamp(
-                    lowCut,
-                    0.0,
-                    1.0)
-                : (lowCut >= 0.5
-                    ? dsp::
-                        lowCutNormalizedFromFrequency(
-                            80.0)
-                    : 0.0);
-    }
-
-    double nextDecay =
-        nextRoom;
-
-    if (version >= 3) {
-        double decay = 0.0;
-
-        if (!stream.readDouble(
-                decay) ||
-            !std::isfinite(
-                decay)) {
-
-            return kResultFalse;
-        }
-
-        nextDecay =
-            std::clamp(
-                decay,
-                0.0,
-                1.0);
-    }
-
-    double nextMode = 0.0;
-
-    if (version >= 5) {
-        double mode = 0.0;
-
-        if (!stream.readDouble(
-                mode) ||
-            !std::isfinite(mode)) {
-
-            return kResultFalse;
-        }
-
-        nextMode =
-            std::clamp(
-                mode,
-                0.0,
-                1.0);
-    }
-
-    double nextMass = 0.0;
-
-    if (version >= 6) {
-        double mass = 0.0;
-
-        if (!stream.readDouble(
-                mass) ||
-            !std::isfinite(mass)) {
-
-            return kResultFalse;
-        }
-
-        nextMass =
-            std::clamp(
-                mass,
-                0.0,
-                1.0);
-    }
-
-    double nextDelayWet = 0.0;
-    double nextDelayFeedback = 0.35;
-    double nextDelayDivision =
-        dsp::kDefaultDelayDivisionNormalized;
-
-    if (version >= 8) {
-        double delayWet = 0.0;
-        double delayFeedback = 0.0;
-        double delayDivision = 0.0;
-
-        if (!stream.readDouble(delayWet) ||
-            !stream.readDouble(delayFeedback) ||
-            !stream.readDouble(delayDivision) ||
-            !std::isfinite(delayWet) ||
-            !std::isfinite(delayFeedback) ||
-            !std::isfinite(delayDivision)) {
-            return kResultFalse;
-        }
-
-        nextDelayWet =
-            std::clamp(delayWet, 0.0, 1.0);
-        nextDelayFeedback =
-            std::clamp(delayFeedback, 0.0, 1.0);
-        nextDelayDivision =
-            version <= 10
-                ? dsp::migrateLegacyDelayDivisionNormalized(
-                    delayDivision)
-                : std::clamp(
-                    delayDivision,
-                    0.0,
-                    1.0);
+        value = std::clamp(value, 0.0, 1.0);
     }
 
     ToneMatchStatePayload nextToneMatch {};
+    if (!readToneMatchState(stream, nextToneMatch))
+        return kResultFalse;
 
-    if (version >= 9) {
-        if (!readToneMatchState(
-                stream,
-                nextToneMatch)) {
-            return kResultFalse;
-        }
+    dsp::ToneMatchSpectrumSnapshot nextReferenceSpectrum {};
+    if (!readToneMatchReferenceState(
+            stream,
+            nextReferenceSpectrum)) {
+        return kResultFalse;
     }
 
-    dsp::ToneMatchSpectrumSnapshot
-        nextReferenceSpectrum {};
+    setParamNormalized(kFinish, values[0]);
+    setParamNormalized(kOutput, values[1]);
+    setParamNormalized(kBypass, values[2]);
+    setParamNormalized(kLowCut80, values[3]);
+    setParamNormalized(kMode, values[4]);
+    setParamNormalized(kMass, values[5]);
+    setParamNormalized(kToneMatchAmount, nextToneMatch.amount);
 
-    if (version >= 10) {
-        if (!readToneMatchReferenceState(
-                stream,
-                nextReferenceSpectrum)) {
-            return kResultFalse;
-        }
-    }
-
-    // Mirror the processor's transactional state semantics: a malformed
-    // component state must not partially update host-visible parameters.
-    setParamNormalized(
-        kFinish,
-        nextFinish);
-
-    setParamNormalized(
-        kRoom,
-        nextRoom);
-
-    setParamNormalized(
-        kOutput,
-        nextOutput);
-
-    setParamNormalized(
-        kBypass,
-        nextBypass);
-
-    setParamNormalized(
-        kLowCut80,
-        nextLowCut);
-
-    setParamNormalized(
-        kRoomDecay,
-        nextDecay);
-
-    setParamNormalized(
-        kMode,
-        nextMode);
-
-    setParamNormalized(
-        kMass,
-        nextMass);
-
-    setParamNormalized(
-        kDelayWet,
-        nextDelayWet);
-
-    setParamNormalized(
-        kDelayFeedback,
-        nextDelayFeedback);
-
-    setParamNormalized(
-        kDelayDivision,
-        nextDelayDivision);
-
-    setParamNormalized(
-        kToneMatchAmount,
-        nextToneMatch.amount);
-
-    activeToneMatchProfile_ =
-        nextToneMatch.profile;
-
-    toneMatchReferenceSpectrum_ =
-        nextReferenceSpectrum;
-
+    activeToneMatchProfile_ = nextToneMatch.profile;
+    toneMatchReferenceSpectrum_ = nextReferenceSpectrum;
     toneMatchReferenceReady_ =
         toneMatchReferenceSpectrum_.frameCount >= 4u;
 
+    // Target audio is intentionally not persisted. A restored reference can
+    // be re-used, but TARGET must be analysed again for the current source.
     toneMatchTargetSpectrum_ = {};
     toneMatchTargetReady_ = false;
 
     if (activeToneMatchProfile_.valid) {
-        toneMatchStatus_ =
-            ToneMatchStatus::Ready;
+        toneMatchStatus_ = ToneMatchStatus::Ready;
         toneMatchLastError_.clear();
     } else if (toneMatchReferenceReady_) {
-        if (toneMatchTargetReady_) {
-            tryBuildToneMatchProfile();
-        } else {
-            toneMatchStatus_ =
-                ToneMatchStatus::ReferenceReady;
-            toneMatchLastError_.clear();
-        }
+        toneMatchStatus_ = ToneMatchStatus::ReferenceReady;
+        toneMatchLastError_.clear();
     } else {
-        toneMatchStatus_ =
-            ToneMatchStatus::Empty;
+        toneMatchStatus_ = ToneMatchStatus::Empty;
         toneMatchLastError_.clear();
     }
 

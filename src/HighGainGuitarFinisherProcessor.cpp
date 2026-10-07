@@ -1,7 +1,6 @@
 #include "HighGainGuitarFinisherProcessor.h"
 #include "HighGainGuitarFinisherIDs.h"
 #include "dsp/LowCutMapping.h"
-#include "dsp/DelayDivisionMapping.h"
 #include "AutomationMath.h"
 #include "ToneMatchStateIO.h"
 #include "ToneMatchMessage.h"
@@ -24,7 +23,6 @@ using namespace Steinberg::Vst;
 
 Processor::Processor() {
     setControllerClass(kControllerUID);
-    processContextRequirements.needTempo();
 }
 
 tresult PLUGIN_API Processor::initialize(FUnknown* context) {
@@ -800,204 +798,51 @@ tresult PLUGIN_API Processor::setState(IBStream* state) {
     IBStreamer stream(state, kLittleEndian);
 
     int32 version = 0;
-
     if (!stream.readInt32(version) ||
-        version < kFirstSupportedStateVersion ||
-        version > kStateVersion) {
+        version != kStateVersion) {
         return kResultFalse;
     }
 
-    double legacyValues[4] {};
-
-    for (double& value : legacyValues) {
+    double values[6] {};
+    for (double& value : values) {
         if (!stream.readDouble(value) ||
             !std::isfinite(value)) {
             return kResultFalse;
         }
-
-        value =
-            std::clamp(
-                value,
-                0.0,
-                1.0);
-    }
-
-    const double nextFinish =
-        legacyValues[0];
-
-    const double nextRoom =
-        legacyValues[1];
-
-    const double nextOutput =
-        legacyValues[2];
-
-    const double nextBypass =
-        legacyValues[3];
-
-    double nextLowCut = 0.0;
-
-    if (version >= 2) {
-        double savedLowCut = 0.0;
-
-        if (!stream.readDouble(savedLowCut) ||
-            !std::isfinite(savedLowCut)) {
-            return kResultFalse;
-        }
-
-        nextLowCut =
-            version >= 4
-                ? std::clamp(
-                    savedLowCut,
-                    0.0,
-                    1.0)
-                : (savedLowCut >= 0.5
-                    ? dsp::lowCutNormalizedFromFrequency(
-                        80.0)
-                    : 0.0);
-    }
-
-    double nextRoomDecay =
-        nextRoom;
-
-    if (version >= 3) {
-        double savedDecay = 0.0;
-
-        if (!stream.readDouble(savedDecay) ||
-            !std::isfinite(savedDecay)) {
-            return kResultFalse;
-        }
-
-        nextRoomDecay =
-            std::clamp(
-                savedDecay,
-                0.0,
-                1.0);
-    }
-
-    double nextMode = 0.0;
-
-    if (version >= 5) {
-        double savedMode = 0.0;
-
-        if (!stream.readDouble(savedMode) ||
-            !std::isfinite(savedMode)) {
-            return kResultFalse;
-        }
-
-        nextMode =
-            std::clamp(
-                savedMode,
-                0.0,
-                1.0);
-    }
-
-    double nextMass = 0.0;
-
-    if (version >= 6) {
-        double savedMass = 0.0;
-
-        if (!stream.readDouble(savedMass) ||
-            !std::isfinite(savedMass)) {
-            return kResultFalse;
-        }
-
-        nextMass =
-            std::clamp(
-                savedMass,
-                0.0,
-                1.0);
-    }
-
-    double nextDelayWet = 0.0;
-    double nextDelayFeedback = 0.35;
-    double nextDelayDivision =
-        dsp::kDefaultDelayDivisionNormalized;
-
-    if (version >= 8) {
-        double savedDelayWet = 0.0;
-        double savedDelayFeedback = 0.0;
-        double savedDelayDivision = 0.0;
-
-        if (!stream.readDouble(savedDelayWet) ||
-            !stream.readDouble(savedDelayFeedback) ||
-            !stream.readDouble(savedDelayDivision) ||
-            !std::isfinite(savedDelayWet) ||
-            !std::isfinite(savedDelayFeedback) ||
-            !std::isfinite(savedDelayDivision)) {
-            return kResultFalse;
-        }
-
-        nextDelayWet =
-            std::clamp(savedDelayWet, 0.0, 1.0);
-        nextDelayFeedback =
-            std::clamp(savedDelayFeedback, 0.0, 1.0);
-        nextDelayDivision =
-            version <= 10
-                ? dsp::migrateLegacyDelayDivisionNormalized(
-                    savedDelayDivision)
-                : std::clamp(
-                    savedDelayDivision,
-                    0.0,
-                    1.0);
+        value = std::clamp(value, 0.0, 1.0);
     }
 
     ToneMatchStatePayload nextToneMatch {};
+    if (!readToneMatchState(stream, nextToneMatch))
+        return kResultFalse;
 
-    if (version >= 9) {
-        if (!readToneMatchState(
-                stream,
-                nextToneMatch)) {
-            return kResultFalse;
-        }
+    dsp::ToneMatchSpectrumSnapshot nextReferenceSpectrum {};
+    if (!readToneMatchReferenceState(
+            stream,
+            nextReferenceSpectrum)) {
+        return kResultFalse;
     }
 
-    dsp::ToneMatchSpectrumSnapshot
-        nextReferenceSpectrum {};
+    // Bass Finisher V1 state contract:
+    // FINISH, OUTPUT, BYPASS, LOW CUT, PROFILE, MASS,
+    // followed by Tone Match state and stored reference spectrum.
+    finish_ = values[0];
+    output_ = values[1];
+    bypass_ = values[2];
+    lowCut_ = values[3];
+    mode_ = values[4];
+    mass_ = values[5];
+    toneMatchAmount_ = nextToneMatch.amount;
+    toneMatchProfile_ = nextToneMatch.profile;
+    toneMatchReferenceSpectrum_ = nextReferenceSpectrum;
 
-    if (version >= 10) {
-        if (!readToneMatchReferenceState(
-                stream,
-                nextReferenceSpectrum)) {
-            return kResultFalse;
-        }
-    }
-
-    // State loading is transactional. Do not mutate the live plugin until
-    // the complete serialized state has been read and validated.
-    finish_ = nextFinish;
-    room_ = nextRoom;
-    output_ = nextOutput;
-    bypass_ = nextBypass;
-    lowCut_ = nextLowCut;
-    roomDecay_ = nextRoomDecay;
-    mode_ = nextMode;
-    mass_ = nextMass;
-    delayWet_ = nextDelayWet;
-    delayFeedback_ = nextDelayFeedback;
-    delayDivision_ = nextDelayDivision;
-    toneMatchAmount_ =
-        nextToneMatch.amount;
-    toneMatchProfile_ =
-        nextToneMatch.profile;
-    toneMatchReferenceSpectrum_ =
-        nextReferenceSpectrum;
-
-    toneMatchMailbox_.
-        clearConsumerSide();
-
-    finisher_.setToneMatchProfile(
-        toneMatchProfile_);
-
+    toneMatchMailbox_.clearConsumerSide();
+    finisher_.setToneMatchProfile(toneMatchProfile_);
     syncDSPParameters();
     finisher_.reset();
 
-    const bool bypassed =
-        bypass_ >= 0.5;
-
-    bypassCrossfade_.prepare(
-        sampleRate_,
-        bypassed);
-
+    const bool bypassed = bypass_ >= 0.5;
+    bypassCrossfade_.prepare(sampleRate_, bypassed);
     lastBypassed_ = bypassed;
     bypassDSPDormant_ = bypassed;
 
@@ -1013,18 +858,13 @@ tresult PLUGIN_API Processor::getState(IBStream* state) {
     if (!stream.writeInt32(kStateVersion))
         return kResultFalse;
 
-    const double values[11] {
+    const double values[6] {
         finish_,
-        room_,
         output_,
         bypass_,
         lowCut_,
-        roomDecay_,
         mode_,
-        mass_,
-        delayWet_,
-        delayFeedback_,
-        delayDivision_
+        mass_
     };
 
     for (const double value : values) {
@@ -1033,16 +873,11 @@ tresult PLUGIN_API Processor::getState(IBStream* state) {
     }
 
     ToneMatchStatePayload toneMatch {};
-    toneMatch.amount =
-        toneMatchAmount_;
-    toneMatch.profile =
-        toneMatchProfile_;
+    toneMatch.amount = toneMatchAmount_;
+    toneMatch.profile = toneMatchProfile_;
 
-    if (!writeToneMatchState(
-            stream,
-            toneMatch)) {
+    if (!writeToneMatchState(stream, toneMatch))
         return kResultFalse;
-    }
 
     return writeToneMatchReferenceState(
                stream,

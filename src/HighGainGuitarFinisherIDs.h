@@ -26,9 +26,7 @@ enum ParamID : Steinberg::Vst::ParamID {
     kToneMatchAmount = 111
 };
 
-// Transitional inherited state layout. Only V11 is accepted in this new product
-// until the Bass-specific state contract replaces it.
-constexpr Steinberg::int32 kStateVersion = 11;
-constexpr Steinberg::int32 kFirstSupportedStateVersion = 11;
+// Bass Finisher V1 owns an independent state contract.\nconstexpr Steinberg::int32 kStateVersion = 1;
+constexpr Steinberg::int32 kFirstSupportedStateVersion = 1;
 
 } // namespace HighGainGuitarFinisher
