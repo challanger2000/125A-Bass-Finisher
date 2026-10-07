@@ -4,12 +4,12 @@
 #include "HighGainGuitarFinisherIDs.h"
 #include "HighGainGuitarFinisherProcessor.h"
 
-#define stringPluginName "125A High Gain Guitar Finisher V3"
-#define stringPluginVersion "3.0.0"
+#define stringPluginName "125A Bass Finisher V1"
+#define stringPluginVersion "1.0.0"
 
 BEGIN_FACTORY_DEF(
     "125A",
-    "https://github.com/challanger2000/125A-High-Gain-Guitar-Finisher-Final",
+    "https://github.com/challanger2000/125A-Bass-Finisher",
     "")
 
 DEF_CLASS2(
@@ -27,7 +27,7 @@ DEF_CLASS2(
     INLINE_UID_FROM_FUID(HighGainGuitarFinisher::kControllerUID),
     Steinberg::PClassInfo::kManyInstances,
     kVstComponentControllerClass,
-    "125A High Gain Guitar Finisher V3 Controller",
+    "125A Bass Finisher V1 Controller",
     0,
     "",
     stringPluginVersion,

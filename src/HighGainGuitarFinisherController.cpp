@@ -284,22 +284,6 @@ tresult PLUGIN_API Controller::initialize(
         kFinish);
 
     parameters.addParameter(
-        STR16("Wet"),
-        STR16("%"),
-        0,
-        0.0,
-        automate,
-        kRoom);
-
-    parameters.addParameter(
-        STR16("Decay"),
-        STR16("%"),
-        0,
-        0.5,
-        automate,
-        kRoomDecay);
-
-    parameters.addParameter(
         new RangeParameter(
             STR16("Output"),
             kOutput,
@@ -335,30 +319,6 @@ tresult PLUGIN_API Controller::initialize(
         0.0,
         automate,
         kMass);
-
-    parameters.addParameter(
-        STR16("Delay Wet"),
-        STR16("%"),
-        0,
-        0.0,
-        automate,
-        kDelayWet);
-
-    parameters.addParameter(
-        STR16("Delay Feedback"),
-        STR16("%"),
-        0,
-        0.35,
-        automate,
-        kDelayFeedback);
-
-    parameters.addParameter(
-        STR16("Delay Time"),
-        STR16(""),
-        dsp::kDelayDivisionCount - 1,
-        dsp::kDefaultDelayDivisionNormalized,
-        automate,
-        kDelayDivision);
 
     parameters.addParameter(
         STR16("Match"),

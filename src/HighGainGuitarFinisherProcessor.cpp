@@ -73,18 +73,8 @@ tresult PLUGIN_API Processor::canProcessSampleSize(int32 symbolicSampleSize) {
 }
 
 uint32 PLUGIN_API Processor::getTailSamples() {
-    // V3 worst case: 20 BPM, dotted quarter = 4.5 s. With the
-    // LeadDelay feedback ceiling (0.55), the repeat train falls below
-    // -80 dB after about 69.3 seconds. Report a conservative fixed tail
-    // so offline hosts do not truncate valid echoes.
-    constexpr double kMaximumTailSeconds = 75.0;
-
-    return static_cast<uint32>(
-        std::max(
-            1.0,
-            std::round(
-                sampleRate_ *
-                kMaximumTailSeconds)));
+    // Bass Finisher V1 has no delay/reverb tail.
+    return 0;
 }
 
 tresult PLUGIN_API Processor::setupProcessing(ProcessSetup& setup) {
@@ -468,8 +458,6 @@ void Processor::stopToneMatchCaptureWorker() noexcept {
 void Processor::syncDSPParameters() noexcept {
     finisher_.setFinish(finish_);
     finisher_.setLowCut(lowCut_);
-    finisher_.setRoomWet(room_);
-    finisher_.setRoomDecay(roomDecay_);
     finisher_.setMode(mode_);
     finisher_.setMass(mass_);
     finisher_.setDelayWet(delayWet_);

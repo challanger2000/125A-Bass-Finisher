@@ -59,7 +59,7 @@
     <view class="CTextLabel"
           origin="285,28"
           size="750,32"
-          title="HIGH GAIN GUITAR FINISHER V3"
+          title="BASS FINISHER V1"
           transparent="true"
           font-color="Text"
           font="Title"
@@ -69,7 +69,7 @@
     <view class="CTextLabel"
           origin="360,66"
           size="600,14"
-          title="TONE MATCH • FINAL SHAPING • MIX FIT • SPACE"
+          title="TONE MATCH • FINAL SHAPING • MIX FIT"
           transparent="true"
           font-color="Muted"
           font="Subtitle"
@@ -79,7 +79,7 @@
     <view class="CTextLabel"
           origin="410,87"
           size="500,12"
-          title="ZERO LATENCY MATCH • AUTO LEVEL • TRUE 0–100% WET ROOM"
+          title="ZERO LATENCY MATCH • AUTO LEVEL • BASS FOCUSED"
           transparent="true"
           font-color="Minor"
           font="MinorFont"
@@ -317,7 +317,7 @@
           control-tag="106"
           default-value="0"
           style="horizontal"
-          segment-names="OPEN,BITE,SMOOTH"
+          segment-names="CLEAN,PUNCH,DENSE"
           font="SwitchFont"
           text-color="Muted"
           text-color-highlighted="Text"
@@ -330,7 +330,7 @@
     <view class="CTextLabel"
           origin="322,500"
           size="188,14"
-          title="CHUG • BODY • BITE • FIZZ"
+          title="WEIGHT • PUNCH • DEFINITION"
           transparent="true"
           font-color="Minor"
           font="MinorFont"
@@ -450,207 +450,6 @@
           text-alignment="center"
           mouse-enabled="false"/>
 
-    <!-- SPACE -->
-    <view class="CTextLabel"
-          origin="820,137"
-          size="310,18"
-          title="S P A C E"
-          transparent="true"
-          font-color="Muted"
-          font="Section"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CTextLabel"
-          origin="830,158"
-          size="290,12"
-          title="LEAD DELAY • INDUSTRIAL ROOM"
-          transparent="true"
-          font-color="Minor"
-          font="MinorFont"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CTextLabel"
-          origin="812,180"
-          size="170,12"
-          title="D E L A Y"
-          transparent="true"
-          font-color="Minor"
-          font="MinorFont"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CTextLabel"
-          origin="984,180"
-          size="166,12"
-          title="R O O M"
-          transparent="true"
-          font-color="Minor"
-          font="MinorFont"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CView"
-          custom-view-name="HGGFKnobDelayWet"
-          origin="806,202"
-          size="82,82"/>
-
-    <view class="CView"
-          custom-view-name="HGGFKnobDelayFeedback"
-          origin="896,202"
-          size="82,82"/>
-
-    <view class="CView"
-          custom-view-name="HGGFKnobWet"
-          origin="988,202"
-          size="82,82"/>
-
-    <view class="CView"
-          custom-view-name="HGGFKnobDecay"
-          origin="1078,202"
-          size="82,82"/>
-
-    <view class="CTextLabel"
-          origin="803,287"
-          size="88,16"
-          title="WET"
-          transparent="true"
-          font-color="Text"
-          font="Label"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CTextLabel"
-          origin="893,287"
-          size="88,16"
-          title="FEEDBACK"
-          transparent="true"
-          font-color="Text"
-          font="Label"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CTextLabel"
-          origin="985,287"
-          size="88,16"
-          title="WET"
-          transparent="true"
-          font-color="Text"
-          font="Label"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CTextLabel"
-          origin="1075,287"
-          size="88,16"
-          title="DECAY"
-          transparent="true"
-          font-color="Text"
-          font="Label"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CParamDisplay"
-          origin="803,307"
-          size="88,18"
-          control-tag="108"
-          transparent="true"
-          frame-width="0"
-          font-color="Value"
-          font="ValueFont"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CParamDisplay"
-          origin="893,307"
-          size="88,18"
-          control-tag="109"
-          transparent="true"
-          frame-width="0"
-          font-color="Value"
-          font="ValueFont"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CParamDisplay"
-          origin="985,307"
-          size="88,18"
-          control-tag="101"
-          transparent="true"
-          frame-width="0"
-          font-color="Value"
-          font="ValueFont"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CParamDisplay"
-          origin="1075,307"
-          size="88,18"
-          control-tag="105"
-          transparent="true"
-          frame-width="0"
-          font-color="Value"
-          font="ValueFont"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CTextLabel"
-          origin="824,350"
-          size="142,12"
-          title="SYNC TIME"
-          transparent="true"
-          font-color="Minor"
-          font="MinorFont"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CSegmentButton"
-          origin="808,370"
-          size="174,30"
-          control-tag="110"
-          default-value="0.6"
-          style="horizontal"
-          segment-names="1/16,1/8T,1/8,1/8D,1/4,1/4D"
-          font="SwitchFont"
-          text-color="Muted"
-          text-color-highlighted="Text"
-          gradient="SwitchNormal"
-          gradient-highlighted="SwitchSelected"
-          frame-color="SwitchFrame"
-          frame-width="1"
-          round-radius="4"/>
-
-    <view class="CTextLabel"
-          origin="992,350"
-          size="154,12"
-          title="INDUSTRIAL SPACE"
-          transparent="true"
-          font-color="Minor"
-          font="MinorFont"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CTextLabel"
-          origin="992,373"
-          size="154,14"
-          title="100% WET = ROOM ONLY"
-          transparent="true"
-          font-color="Minor"
-          font="MinorFont"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
-    <view class="CTextLabel"
-          origin="826,441"
-          size="296,14"
-          title="DARK • WIDE • METALLIC • LEAD READY"
-          transparent="true"
-          font-color="Muted"
-          font="MinorFont"
-          text-alignment="center"
-          mouse-enabled="false"/>
-
     <!-- OUTPUT -->
     <view class="CTextLabel"
           origin="1183,137"
@@ -711,7 +510,7 @@
     <view class="CTextLabel"
           origin="1183,512"
           size="100,12"
-          title="v3.0.0"
+          title="v1.0.0"
           transparent="true"
           font-color="Minor"
           font="MinorFont"
