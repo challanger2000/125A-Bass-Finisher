@@ -9,8 +9,8 @@
 
 namespace HighGainGuitarFinisher::dsp {
 
-inline constexpr std::size_t kToneMatchTemporalCurveBins = 96;
-inline constexpr std::size_t kToneMatchTemporalFrameSlots = 64;
+inline constexpr std::size_t kToneMatchTemporalCurveBins = 48;
+inline constexpr std::size_t kToneMatchTemporalFrameSlots = 32;
 
 struct ToneMatchSpectrumSnapshot {
     double sampleRate {44100.0};
