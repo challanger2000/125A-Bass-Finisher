@@ -12,8 +12,108 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdlib>
 #include <iostream>
+#include <new>
 #include <vector>
+
+#if defined(_WIN32)
+#include <malloc.h>
+#endif
+
+
+namespace {
+bool gTrackProcessorAllocations = false;
+std::size_t gProcessorAllocationCount = 0;
+
+void noteProcessorAllocation() noexcept {
+    if (gTrackProcessorAllocations)
+        ++gProcessorAllocationCount;
+}
+}
+
+void* operator new(std::size_t size) {
+    noteProcessorAllocation();
+    if (void* ptr = std::malloc(size))
+        return ptr;
+    throw std::bad_alloc {};
+}
+
+void* operator new[](std::size_t size) {
+    noteProcessorAllocation();
+    if (void* ptr = std::malloc(size))
+        return ptr;
+    throw std::bad_alloc {};
+}
+
+void operator delete(void* ptr) noexcept {
+    std::free(ptr);
+}
+
+void operator delete[](void* ptr) noexcept {
+    std::free(ptr);
+}
+
+void operator delete(void* ptr, std::size_t) noexcept {
+    std::free(ptr);
+}
+
+void operator delete[](void* ptr, std::size_t) noexcept {
+    std::free(ptr);
+}
+
+#if defined(__cpp_aligned_new)
+void* operator new(std::size_t size, std::align_val_t alignment) {
+    noteProcessorAllocation();
+#if defined(_WIN32)
+    if (void* ptr = _aligned_malloc(
+            size,
+            static_cast<std::size_t>(alignment))) {
+        return ptr;
+    }
+#else
+    void* ptr = nullptr;
+    if (posix_memalign(
+            &ptr,
+            static_cast<std::size_t>(alignment),
+            size) == 0) {
+        return ptr;
+    }
+#endif
+    throw std::bad_alloc {};
+}
+
+void* operator new[](std::size_t size, std::align_val_t alignment) {
+    return ::operator new(size, alignment);
+}
+
+void operator delete(void* ptr, std::align_val_t) noexcept {
+#if defined(_WIN32)
+    _aligned_free(ptr);
+#else
+    std::free(ptr);
+#endif
+}
+
+void operator delete[](void* ptr, std::align_val_t alignment) noexcept {
+    ::operator delete(ptr, alignment);
+}
+
+void operator delete(
+    void* ptr,
+    std::size_t,
+    std::align_val_t alignment) noexcept {
+    ::operator delete(ptr, alignment);
+}
+
+void operator delete[](
+    void* ptr,
+    std::size_t,
+    std::align_val_t alignment) noexcept {
+    ::operator delete(ptr, alignment);
+}
+#endif
 
 using HighGainGuitarFinisher::Processor;
 using namespace HighGainGuitarFinisher;
@@ -157,6 +257,7 @@ void verifyLifecycleAndBusContracts() {
     BF_REQUIRE(p.canProcessSampleSize(kSample32) == kResultTrue);
     BF_REQUIRE(p.canProcessSampleSize(kSample64) == kResultTrue);
     BF_REQUIRE(p.getTailSamples() == 0u);
+    BF_REQUIRE(p.getLatencySamples() == 0u);
 
     ProcessSetup setup {};
     setup.processMode = kRealtime;
@@ -912,6 +1013,492 @@ void verifyIoEventAndTortureContracts() {
         kResultOk);
 }
 
+
+void writeAudioRecallState(MemoryStream& stream) {
+    IBStreamer writer(&stream, kLittleEndian);
+
+    BF_REQUIRE(
+        writer.writeInt32(
+            kStateVersion));
+
+    const double values[6] {
+        0.63,
+        0.57,
+        0.0,
+        dsp::lowCutNormalizedFromFrequency(
+            55.0),
+        0.5,
+        0.48
+    };
+
+    for (const double value : values)
+        BF_REQUIRE(
+            writer.writeDouble(
+                value));
+
+    ToneMatchStatePayload match {};
+    match.amount = 0.72;
+    match.profile.valid = true;
+    match.profile.lowShelfFrequencyHz = 72.0;
+    match.profile.lowShelfGainDb = 1.1;
+    match.profile.highShelfFrequencyHz = 6200.0;
+    match.profile.highShelfGainDb = -0.9;
+
+    for (std::size_t i = 0;
+         i < match.profile.peaks.size();
+         ++i) {
+        match.profile.peaks[i].frequencyHz =
+            120.0 +
+            310.0 *
+                static_cast<double>(i);
+        match.profile.peaks[i].q =
+            0.85 +
+            0.03 *
+                static_cast<double>(i);
+        match.profile.peaks[i].gainDb =
+            -0.8 +
+            0.12 *
+                static_cast<double>(i);
+    }
+
+    BF_REQUIRE(
+        writeToneMatchState(
+            writer,
+            match));
+
+    dsp::ToneMatchSpectrumSnapshot reference {};
+    reference.sampleRate = kFs;
+    reference.frameCount = 8u;
+
+    for (std::size_t i = 0;
+         i < reference.meanPower.size();
+         ++i) {
+        reference.meanPower[i] =
+            1.0e-6 +
+            1.0e-9 *
+                static_cast<double>(i);
+    }
+
+    BF_REQUIRE(
+        writeToneMatchReferenceState(
+            writer,
+            reference));
+}
+
+std::array<std::vector<double>, 2>
+renderStateRecallProcessor(
+    Processor& processor) {
+
+    constexpr int32 block = 256;
+    constexpr int32 total = 4096;
+
+    SpeakerArrangement stereo[1] {
+        SpeakerArr::kStereo
+    };
+
+    BF_REQUIRE(
+        processor.setBusArrangements(
+            stereo,
+            1,
+            stereo,
+            1) ==
+        kResultOk);
+
+    ProcessSetup setup {};
+    setup.processMode = kRealtime;
+    setup.symbolicSampleSize = kSample64;
+    setup.maxSamplesPerBlock = block;
+    setup.sampleRate = kFs;
+
+    BF_REQUIRE(
+        processor.setupProcessing(
+            setup) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        processor.setActive(true) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        processor.setProcessing(true) ==
+        kResultOk);
+
+    std::array<std::vector<double>, 2> rendered {
+        std::vector<double>(
+            static_cast<std::size_t>(total)),
+        std::vector<double>(
+            static_cast<std::size_t>(total))
+    };
+
+    std::array<double, block> inL {};
+    std::array<double, block> inR {};
+    std::array<double, block> outL {};
+    std::array<double, block> outR {};
+
+    for (int32 offset = 0;
+         offset < total;
+         offset += block) {
+
+        for (int32 i = 0;
+             i < block;
+             ++i) {
+            const double t =
+                static_cast<double>(
+                    offset + i) /
+                kFs;
+
+            inL[static_cast<std::size_t>(i)] =
+                0.24 *
+                    std::sin(
+                        2.0 *
+                        3.14159265358979323846 *
+                        55.0 * t +
+                        0.23) +
+                0.08 *
+                    std::sin(
+                        2.0 *
+                        3.14159265358979323846 *
+                        880.0 * t +
+                        0.41);
+
+            inR[static_cast<std::size_t>(i)] =
+                0.22 *
+                    std::sin(
+                        2.0 *
+                        3.14159265358979323846 *
+                        61.74 * t +
+                        0.37) +
+                0.07 *
+                    std::sin(
+                        2.0 *
+                        3.14159265358979323846 *
+                        1450.0 * t +
+                        0.67);
+        }
+
+        double* inputs[2] {
+            inL.data(),
+            inR.data()
+        };
+
+        double* outputs[2] {
+            outL.data(),
+            outR.data()
+        };
+
+        AudioBusBuffers inBus {};
+        inBus.numChannels = 2;
+        inBus.channelBuffers64 = inputs;
+
+        AudioBusBuffers outBus {};
+        outBus.numChannels = 2;
+        outBus.channelBuffers64 = outputs;
+
+        ProcessData data {};
+        data.processMode = kRealtime;
+        data.symbolicSampleSize = kSample64;
+        data.numSamples = block;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = &inBus;
+        data.outputs = &outBus;
+
+        BF_REQUIRE(
+            processor.process(data) ==
+            kResultOk);
+
+        for (int32 i = 0;
+             i < block;
+             ++i) {
+            rendered[0][
+                static_cast<std::size_t>(
+                    offset + i)] =
+                outL[
+                    static_cast<std::size_t>(i)];
+
+            rendered[1][
+                static_cast<std::size_t>(
+                    offset + i)] =
+                outR[
+                    static_cast<std::size_t>(i)];
+        }
+    }
+
+    BF_REQUIRE(
+        processor.setProcessing(false) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        processor.setActive(false) ==
+        kResultOk);
+
+    return rendered;
+}
+
+void verifyStateRecallRestoresAudioResult() {
+    Processor source;
+    Processor restored;
+
+    BF_REQUIRE(
+        source.initialize(nullptr) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        restored.initialize(nullptr) ==
+        kResultOk);
+
+    MemoryStream initial;
+    writeAudioRecallState(initial);
+    rewind(initial);
+
+    BF_REQUIRE(
+        source.setState(&initial) ==
+        kResultOk);
+
+    MemoryStream saved;
+
+    BF_REQUIRE(
+        source.getState(&saved) ==
+        kResultOk);
+
+    rewind(saved);
+
+    BF_REQUIRE(
+        restored.setState(&saved) ==
+        kResultOk);
+
+    const auto sourceAudio =
+        renderStateRecallProcessor(
+            source);
+
+    const auto restoredAudio =
+        renderStateRecallProcessor(
+            restored);
+
+    for (std::size_t channel = 0;
+         channel < sourceAudio.size();
+         ++channel) {
+
+        BF_REQUIRE(
+            sourceAudio[channel].size() ==
+            restoredAudio[channel].size());
+
+        for (std::size_t i = 0;
+             i < sourceAudio[channel].size();
+             ++i) {
+
+            BF_REQUIRE(
+                std::abs(
+                    sourceAudio[channel][i] -
+                    restoredAudio[channel][i]) <
+                1.0e-12);
+        }
+    }
+
+    BF_REQUIRE(
+        source.terminate() ==
+        kResultOk);
+
+    BF_REQUIRE(
+        restored.terminate() ==
+        kResultOk);
+}
+
+void verifyProcessorCallbackHasNoAllocations() {
+    Processor processor;
+
+    BF_REQUIRE(
+        processor.initialize(nullptr) ==
+        kResultOk);
+
+    SpeakerArrangement stereo[1] {
+        SpeakerArr::kStereo
+    };
+
+    BF_REQUIRE(
+        processor.setBusArrangements(
+            stereo,
+            1,
+            stereo,
+            1) ==
+        kResultOk);
+
+    ProcessSetup setup {};
+    setup.processMode = kRealtime;
+    setup.symbolicSampleSize = kSample64;
+    setup.maxSamplesPerBlock = kBlock;
+    setup.sampleRate = kFs;
+
+    BF_REQUIRE(
+        processor.setupProcessing(
+            setup) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        processor.setActive(true) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        processor.setProcessing(true) ==
+        kResultOk);
+
+    ParameterChanges settings(5);
+    addChange(
+        settings,
+        HighGainGuitarFinisher::kFinish,
+        1.0);
+    addChange(
+        settings,
+        HighGainGuitarFinisher::kLowCut80,
+        dsp::lowCutNormalizedFromFrequency(
+            55.0));
+    addChange(
+        settings,
+        HighGainGuitarFinisher::kMode,
+        0.5);
+    addChange(
+        settings,
+        HighGainGuitarFinisher::kMass,
+        0.72);
+    addChange(
+        settings,
+        HighGainGuitarFinisher::kOutput,
+        0.5);
+
+    ProcessData flush {};
+    flush.processMode = kRealtime;
+    flush.symbolicSampleSize = kSample64;
+    flush.numSamples = 0;
+    flush.inputParameterChanges = &settings;
+
+    BF_REQUIRE(
+        processor.process(flush) ==
+        kResultOk);
+
+    std::array<double, kBlock> inL {};
+    std::array<double, kBlock> inR {};
+    std::array<double, kBlock> outL {};
+    std::array<double, kBlock> outR {};
+
+    double* inputs[2] {
+        inL.data(),
+        inR.data()
+    };
+
+    double* outputs[2] {
+        outL.data(),
+        outR.data()
+    };
+
+    AudioBusBuffers inBus {};
+    inBus.numChannels = 2;
+    inBus.channelBuffers64 = inputs;
+
+    AudioBusBuffers outBus {};
+    outBus.numChannels = 2;
+    outBus.channelBuffers64 = outputs;
+
+    ProcessData data {};
+    data.processMode = kRealtime;
+    data.symbolicSampleSize = kSample64;
+    data.numSamples = kBlock;
+    data.numInputs = 1;
+    data.numOutputs = 1;
+    data.inputs = &inBus;
+    data.outputs = &outBus;
+
+    auto fillBlock =
+        [&](int blockIndex) {
+            for (int32 i = 0;
+                 i < kBlock;
+                 ++i) {
+                const double t =
+                    static_cast<double>(
+                        blockIndex * kBlock + i) /
+                    kFs;
+
+                inL[static_cast<std::size_t>(i)] =
+                    0.27 *
+                        std::sin(
+                            2.0 *
+                            3.14159265358979323846 *
+                            55.0 * t +
+                            0.19) +
+                    0.09 *
+                        std::sin(
+                            2.0 *
+                            3.14159265358979323846 *
+                            1800.0 * t +
+                            0.43);
+
+                inR[static_cast<std::size_t>(i)] =
+                    0.25 *
+                        std::sin(
+                            2.0 *
+                            3.14159265358979323846 *
+                            61.74 * t +
+                            0.31) +
+                    0.08 *
+                        std::sin(
+                            2.0 *
+                            3.14159265358979323846 *
+                            2300.0 * t +
+                            0.71);
+            }
+        };
+
+    for (int blockIndex = 0;
+         blockIndex < 16;
+         ++blockIndex) {
+        fillBlock(blockIndex);
+        BF_REQUIRE(
+            processor.process(data) ==
+            kResultOk);
+    }
+
+    gProcessorAllocationCount = 0;
+    gTrackProcessorAllocations = true;
+
+    bool processOk = true;
+    double checksum = 0.0;
+
+    for (int blockIndex = 16;
+         blockIndex < 144;
+         ++blockIndex) {
+        fillBlock(blockIndex);
+
+        if (processor.process(data) !=
+            kResultOk) {
+            processOk = false;
+            break;
+        }
+
+        checksum +=
+            outL[0] +
+            outR[kBlock - 1];
+    }
+
+    gTrackProcessorAllocations = false;
+
+    BF_REQUIRE(processOk);
+    BF_REQUIRE(std::isfinite(checksum));
+    BF_REQUIRE(
+        gProcessorAllocationCount ==
+        0u);
+
+    BF_REQUIRE(
+        processor.setProcessing(false) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        processor.setActive(false) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        processor.terminate() ==
+        kResultOk);
+}
+
 void verifyProcessingMatrix() {
     const int32 blockSizes[] {
         1,
@@ -961,6 +1548,8 @@ int main() {
     verifySampleAccurateOutputAutomation();
     verifyActivePathBlockAndModeInvariance();
     verifyIoEventAndTortureContracts();
+    verifyStateRecallRestoresAudioResult();
+    verifyProcessorCallbackHasNoAllocations();
     verifyProcessingMatrix();
     std::cout << "Bass Finisher processor contracts passed\n";
     return 0;

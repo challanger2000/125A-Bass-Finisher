@@ -6,6 +6,8 @@
 
 #include "base/source/fstreamer.h"
 #include "public.sdk/source/common/memorystream.h"
+#include "vstgui/lib/controls/ccontrol.h"
+#include "vstgui/lib/events.h"
 
 #include <cmath>
 #include <iostream>
@@ -106,6 +108,122 @@ void verifyParameterContract() {
     BF_REQUIRE(std::abs(parsed - 0.42) < 1.0e-12);
 
     BF_REQUIRE(c.terminate() == kResultOk);
+}
+
+
+void verifyCustomKnobCtrlResetContract() {
+    Controller controller;
+
+    BF_REQUIRE(
+        controller.initialize(nullptr) ==
+        kResultOk);
+
+    auto* editor =
+        new VSTGUI::VST3Editor(
+            &controller,
+            "view",
+            "HighGainGuitarFinisher.uidesc");
+
+    BF_REQUIRE(editor != nullptr);
+
+    struct ControlSpec {
+        const char* name;
+        Steinberg::Vst::ParamID tag;
+        float defaultValue;
+        float probeValue;
+    };
+
+    const ControlSpec controls[] {
+        {
+            "HGGFKnobMatch",
+            HighGainGuitarFinisher::kToneMatchAmount,
+            0.0f,
+            0.73f
+        },
+        {
+            "HGGFKnobFinish",
+            HighGainGuitarFinisher::kFinish,
+            0.0f,
+            0.81f
+        },
+        {
+            "HGGFKnobLowCut",
+            HighGainGuitarFinisher::kLowCut80,
+            0.0f,
+            0.66f
+        },
+        {
+            "HGGFKnobMass",
+            HighGainGuitarFinisher::kMass,
+            0.0f,
+            0.59f
+        },
+        {
+            "HGGFKnobOutput",
+            HighGainGuitarFinisher::kOutput,
+            0.5f,
+            0.17f
+        }
+    };
+
+    VSTGUI::UIAttributes attributes;
+
+    for (const auto& spec : controls) {
+        auto* view =
+            controller.createCustomView(
+                spec.name,
+                attributes,
+                nullptr,
+                editor);
+
+        BF_REQUIRE(view != nullptr);
+
+        auto* control =
+            dynamic_cast<
+                VSTGUI::CControl*>(
+                    view);
+
+        BF_REQUIRE(control != nullptr);
+        BF_REQUIRE(
+            control->getTag() ==
+            static_cast<int32>(
+                spec.tag));
+
+        BF_REQUIRE(
+            std::abs(
+                control->getDefaultValue() -
+                spec.defaultValue) <
+            1.0e-7f);
+
+        control->setValueNormalized(
+            spec.probeValue);
+
+        VSTGUI::MouseDownEvent event;
+        event.buttonState.set(
+            VSTGUI::MouseButton::Left);
+        event.modifiers =
+            VSTGUI::ModifierKey::Control;
+
+        control->dispatchEvent(event);
+
+        BF_REQUIRE(
+            static_cast<bool>(
+                event.consumed));
+
+        BF_REQUIRE(
+            std::abs(
+                control->getValueNormalized() -
+                spec.defaultValue) <
+            1.0e-7f);
+
+        view->forget();
+    }
+
+    editor->release();
+
+    BF_REQUIRE(
+        controller.terminate() ==
+        kResultOk);
 }
 
 void verifyControllerZoomState() {
@@ -420,6 +538,7 @@ int main() {
     verifyEditorLifecycle();
 #endif
     verifyParameterContract();
+    verifyCustomKnobCtrlResetContract();
     verifyControllerZoomState();
     verifyComponentStateContract();
 

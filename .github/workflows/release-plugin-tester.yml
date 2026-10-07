@@ -1,4 +1,4 @@
-name: Bass Finisher Release Plugin Tester
+name: Bass Finisher Full Release QA
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ on:
       - ".github/workflows/release-plugin-tester.yml"
 
 jobs:
-  plugin-tester:
+  release-qa:
     runs-on: windows-2022
 
     steps:
@@ -19,8 +19,11 @@ jobs:
       - name: Configure Bass Finisher
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
-      - name: Build Bass Finisher
-        run: cmake --build build --config Release --target BassFinisher --parallel
+      - name: Build plugin and complete internal QA
+        run: cmake --build build --config Release --target BassFinisher BassFinisherDSPContractTests BassFinisherToneMatchTests BassFinisherAutomationMathTests BassFinisherBypassCrossfadeTests BassFinisherStateV1Tests BassFinisherProcessorContractTests BassFinisherRealtimeAllocationTests BassFinisherToneMatchQualityTests BassFinisherControllerContractTests --parallel
+
+      - name: Run complete internal QA
+        run: ctest --test-dir build -C Release --output-on-failure -V
 
       - name: Locate Bass Finisher VST3
         id: bass
@@ -60,39 +63,59 @@ jobs:
           Remove-Item $env:125A_PLUGIN_TESTER_REPORT_DIR -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path $env:125A_PLUGIN_TESTER_REPORT_DIR | Out-Null
 
-          Write-Host "Running $($tester.FullName)"
-          Write-Host "Against $env:BASS_PLUGIN"
-
           $process = Start-Process -FilePath $tester.FullName -ArgumentList @($env:BASS_PLUGIN) -Wait -PassThru
           Write-Host "125A Plugin Tester exit code: $($process.ExitCode)"
 
           $report = Get-ChildItem $env:125A_PLUGIN_TESTER_REPORT_DIR -File -Filter "*_125A_QA_Report.txt" | Select-Object -First 1
           $json = Get-ChildItem $env:125A_PLUGIN_TESTER_REPORT_DIR -File -Filter "*_125A_QA_Report.json" | Select-Object -First 1
 
-          if ($report) {
-            Write-Host "----- 125A QA REPORT -----"
-            Get-Content $report.FullName -Raw | Write-Host
-            Write-Host "----- END 125A QA REPORT -----"
-          }
-
           if (-not $report) { throw "125A Plugin Tester did not produce a QA report" }
           if (-not $json) { throw "125A Plugin Tester did not produce a JSON QA report" }
 
+          Write-Host "----- 125A QA REPORT -----"
+          Get-Content $report.FullName -Raw | Write-Host
+          Write-Host "----- END 125A QA REPORT -----"
+
+          $reportText = Get-Content $report.FullName -Raw
           $data = Get-Content $json.FullName -Raw | ConvertFrom-Json
+
           if ($data.status -ne "PASS") {
             throw "125A Plugin Tester result was $($data.status), expected PASS"
+          }
+
+          if (-not $reportText.Contains("0 WARNING / 0 FAIL")) {
+            throw "125A Plugin Tester report was not clean"
+          }
+
+          if (-not $reportText.Contains("RELEASE: PASS")) {
+            throw "125A Plugin Tester did not grant RELEASE: PASS"
           }
 
           if ($process.ExitCode -ne 0) {
             throw "125A Plugin Tester returned exit code $($process.ExitCode)"
           }
 
-          Write-Host "125A PLUGIN TESTER v0.2.9: PASS"
+          Write-Host "125A FULL RELEASE QA: PASS"
 
-      - name: Upload 125A Plugin Tester reports
+      - name: Stage exact tested VST3
+        shell: pwsh
+        env:
+          BASS_PLUGIN: ${{ steps.bass.outputs.plugin }}
+        run: |
+          Remove-Item release-artifact -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force release-artifact | Out-Null
+          Copy-Item -Path $env:BASS_PLUGIN -Destination release-artifact -Recurse -Force
+
+      - name: Upload exact tested VST3
+        uses: actions/upload-artifact@v4
+        with:
+          name: 125A-Bass-Finisher-V1-Full-Release-QA
+          path: release-artifact
+
+      - name: Upload complete 125A QA reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: 125A-Bass-Finisher-Plugin-Tester-Reports
+          name: 125A-Bass-Finisher-Full-Release-QA-Reports
           path: plugin-tester-reports/*
           if-no-files-found: warn
