@@ -832,10 +832,10 @@ Controller::getParamStringByValue(
         case kMode:
             copyAscii(
                 valueNormalized < 0.25
-                    ? "OPEN"
+                    ? "CLEAN"
                     : (valueNormalized < 0.75
-                        ? "BITE"
-                        : "SMOOTH"),
+                        ? "PUNCH"
+                        : "DENSE"),
                 string);
             return kResultTrue;
 
@@ -905,17 +905,17 @@ Controller::getParamValueByString(
     }
 
     if (id == kMode) {
-        if (asciiEqualsIgnoreCase(string, "OPEN")) {
+        if (asciiEqualsIgnoreCase(string, "CLEAN")) {
             valueNormalized = 0.0;
             return kResultTrue;
         }
 
-        if (asciiEqualsIgnoreCase(string, "BITE")) {
+        if (asciiEqualsIgnoreCase(string, "PUNCH")) {
             valueNormalized = 0.5;
             return kResultTrue;
         }
 
-        if (asciiEqualsIgnoreCase(string, "SMOOTH")) {
+        if (asciiEqualsIgnoreCase(string, "DENSE")) {
             valueNormalized = 1.0;
             return kResultTrue;
         }

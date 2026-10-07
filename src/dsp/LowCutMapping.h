@@ -5,8 +5,8 @@
 
 namespace HighGainGuitarFinisher::dsp {
 
-constexpr double kLowCutMinimumHz = 45.0;
-constexpr double kLowCutMaximumHz = 120.0;
+constexpr double kLowCutMinimumHz = 25.0;
+constexpr double kLowCutMaximumHz = 90.0;
 constexpr double kLowCutOnsetNormalized = 0.01;
 
 inline bool lowCutEnabled(double normalized) noexcept {

@@ -27,8 +27,8 @@ private:
 
     static constexpr std::array<double, kBandCount>
         kCenters {
-            1500.0, 1800.0, 2200.0, 2700.0, 3300.0,
-            4000.0, 4800.0, 5800.0, 6800.0, 8000.0
+            650.0, 850.0, 1100.0, 1450.0, 1900.0,
+            2500.0, 3200.0, 4100.0, 5200.0, 6500.0
         };
 
     std::array<std::array<Biquad, kBandCount>, 2> detectors_ {};

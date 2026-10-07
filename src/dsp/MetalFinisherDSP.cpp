@@ -6,23 +6,23 @@
 namespace HighGainGuitarFinisher::dsp {
 
 namespace {
-constexpr double kMassBoostHz = 140.0;
-constexpr double kMassBoostDb = 10.50;
-constexpr double kMassBoostQ = 1.20;
+constexpr double kMassBoostHz = 75.0;
+constexpr double kMassBoostDb = 6.0;
+constexpr double kMassBoostQ = 0.80;
 constexpr double kMassCleanupHz = 220.0;
-constexpr double kMassCleanupDb = -10.50;
-constexpr double kMassCleanupQ = 1.00;
-constexpr double kMassTrimDb = -0.60;
+constexpr double kMassCleanupDb = -4.5;
+constexpr double kMassCleanupQ = 0.90;
+constexpr double kMassTrimDb = -0.30;
 
 // At Low Cut Off the V2 MASS curve is preserved exactly. As the user moves
 // the mix-placement high-pass upward, MASS shifts its positive weight above
 // the cut and reduces the amount of deep boost. These endpoints are
 // EMPIRICALLY TUNED and guarded by measured response tests.
-constexpr double kMassBoostShiftHzAtMaxLowCut = 45.0;
-constexpr double kMassBoostReductionDbAtMaxLowCut = 4.0;
-constexpr double kMassCleanupShiftHzAtMaxLowCut = 80.0;
-constexpr double kMassCleanupReductionDbAtMaxLowCut = 3.0;
-constexpr double kMassTrimReductionDbAtMaxLowCut = 0.25;
+constexpr double kMassBoostShiftHzAtMaxLowCut = 35.0;
+constexpr double kMassBoostReductionDbAtMaxLowCut = 3.5;
+constexpr double kMassCleanupShiftHzAtMaxLowCut = 100.0;
+constexpr double kMassCleanupReductionDbAtMaxLowCut = 2.0;
+constexpr double kMassTrimReductionDbAtMaxLowCut = 0.15;
 
 // Emergency numerical guard only. +36.1 dBFS is far beyond the intended
 // operating range but keeps hostile/invalid host input from poisoning state.
@@ -46,31 +46,31 @@ void MetalFinisherDSP::prepare(double sampleRate) {
     lowEnd_.prepare(
         sampleRate_,
         AdaptiveBandMode::LowTransient,
-        {85.0, 110.0, 145.0, 180.0},
-        2.5);
+        {45.0, 65.0, 85.0, 110.0},
+        2.0);
 
     body_.prepare(
         sampleRate_,
         AdaptiveBandMode::BodyResonance,
-        {220.0, 300.0, 390.0, 500.0},
+        {120.0, 170.0, 240.0, 340.0},
         0.9);
 
     articulation_.prepare(
         sampleRate_,
         AdaptiveBandMode::ArticulationSupport,
-        {800.0, 1200.0, 1750.0, 2400.0},
-        0.85);
+        {650.0, 1000.0, 1500.0, 2200.0},
+        0.90);
 
     harshness_.prepare(
         sampleRate_,
         AdaptiveBandMode::Harshness,
-        {2800.0, 3600.0, 4500.0, 5600.0},
-        1.15);
+        {2500.0, 3200.0, 4000.0, 5000.0},
+        1.10);
 
     fizz_.prepare(
         sampleRate_,
         AdaptiveBandMode::Fizz,
-        {6000.0, 7500.0, 9000.0, 11000.0},
+        {5200.0, 6500.0, 8000.0, 10000.0},
         1.0);
 
     resonanceSuppressor_.
@@ -79,13 +79,13 @@ void MetalFinisherDSP::prepare(double sampleRate) {
     const auto unityLowShelf =
         makeLowShelf(
             sampleRate_,
-            80.0,
+            70.0,
             0.0);
 
     const auto unityHighShelf =
         makeHighShelf(
             sampleRate_,
-            10000.0,
+            6500.0,
             0.0);
 
     for (auto& filter : makeupLowShelf_)
@@ -290,13 +290,13 @@ void MetalFinisherDSP::updateMakeupShelfCoefficients() noexcept {
     const auto lowShelf =
         makeLowShelf(
             sampleRate_,
-            80.0,
+            70.0,
             cancellationDb);
 
     const auto highShelf =
         makeHighShelf(
             sampleRate_,
-            10000.0,
+            6500.0,
             cancellationDb);
 
     for (auto& filter : makeupLowShelf_)
@@ -339,33 +339,33 @@ void MetalFinisherDSP::updateModeTargets() noexcept {
             : (modeTarget_ < 0.75 ? 1 : 2);
 
     if (mode == 0) {
-        // Open / balanced: clearly more presence and articulation than the
-        // dense profile, without reaching Mode 2's aggressive bite.
+        // CLEAN: restrained correction, retains natural DI/amp character.
         modeWeightTargets_ = {
-            1.00,
-            0.90,
-            1.10,
-            0.80,
-            0.70
-        };
-    } else if (mode == 1) {
-        // Bite / industrial: keep the current user-preferred profile exactly.
-        modeWeightTargets_ = {
-            1.10,
-            0.80,
-            1.00,
-            0.15,
-            0.85
-        };
-    } else {
-        // Dense / smooth: retain extra body, but avoid the previous overly
-        // dark top-end suppression.
-        modeWeightTargets_ = {
-            0.75,
             0.65,
             0.55,
-            0.95,
-            1.05
+            0.65,
+            0.50,
+            0.35
+        };
+    } else if (mode == 1) {
+        // PUNCH: stronger transient control and midrange articulation so
+        // bass remains readable against dense guitars and kick.
+        modeWeightTargets_ = {
+            1.15,
+            0.75,
+            1.15,
+            0.45,
+            0.55
+        };
+    } else {
+        // DENSE: preserve low/body weight while smoothing aggressive clank
+        // and upper harmonics.
+        modeWeightTargets_ = {
+            0.55,
+            0.45,
+            0.55,
+            1.00,
+            1.10
         };
     }
 }
