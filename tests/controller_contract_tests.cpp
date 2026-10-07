@@ -7,6 +7,7 @@
 #include "base/source/fstreamer.h"
 #include "public.sdk/source/common/memorystream.h"
 #include "vstgui/lib/controls/ccontrol.h"
+#include "vstgui/lib/controls/icontrollistener.h"
 #include "vstgui/lib/events.h"
 #include "vstgui/uidescription/uiattributes.h"
 
@@ -112,6 +113,14 @@ void verifyParameterContract() {
 }
 
 
+class NoopControlListener final :
+    public VSTGUI::IControlListener {
+public:
+    void valueChanged(
+        VSTGUI::CControl*) override {
+    }
+};
+
 void verifyCustomKnobCtrlResetContract() {
     Controller controller;
 
@@ -168,6 +177,7 @@ void verifyCustomKnobCtrlResetContract() {
     };
 
     VSTGUI::UIAttributes attributes;
+    NoopControlListener noopListener;
 
     for (const auto& spec : controls) {
         auto* view =
@@ -195,6 +205,12 @@ void verifyCustomKnobCtrlResetContract() {
                 control->getDefaultValue() -
                 spec.defaultValue) <
             1.0e-7f);
+
+        // The default-reset gesture belongs to VSTGUI::CControl itself.
+        // Keep the real controller-created SteelKnob and real Ctrl-click
+        // event path, but decouple the gesture test from host automation
+        // callbacks because this editor is intentionally not opened here.
+        control->setListener(&noopListener);
 
         control->setValueNormalized(
             spec.probeValue);
