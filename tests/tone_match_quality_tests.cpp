@@ -102,13 +102,88 @@ double sampleDb(
     const ToneMatchSpectrumSnapshot& s,
     double frequency) {
 
+    if (s.hasLogCurve) {
+        const double maximumFrequency =
+            std::min(
+                ToneMatchAnalyzer::kCurveMaximumHz,
+                s.sampleRate * 0.45);
+
+        const double f =
+            std::clamp(
+                frequency,
+                ToneMatchAnalyzer::kCurveMinimumHz,
+                maximumFrequency);
+
+        const double position =
+            (std::log(f) -
+             std::log(
+                 ToneMatchAnalyzer::kCurveMinimumHz)) /
+            (std::log(maximumFrequency) -
+             std::log(
+                 ToneMatchAnalyzer::kCurveMinimumHz));
+
+        const double exactIndex =
+            position *
+            static_cast<double>(
+                ToneMatchAnalyzer::kCurveBins - 1u);
+
+        const std::size_t index0 =
+            std::min(
+                static_cast<std::size_t>(
+                    std::floor(exactIndex)),
+                ToneMatchAnalyzer::kCurveBins - 1u);
+
+        const std::size_t index1 =
+            std::min(
+                index0 + 1u,
+                ToneMatchAnalyzer::kCurveBins - 1u);
+
+        const double fraction =
+            exactIndex -
+            static_cast<double>(index0);
+
+        return
+            s.meanDb[index0] +
+            (s.meanDb[index1] -
+             s.meanDb[index0]) *
+                fraction;
+    }
+
+    const double exactBin =
+        std::clamp(
+            frequency *
+                static_cast<double>(
+                    ToneMatchAnalyzer::kFftSize) /
+                s.sampleRate,
+            0.0,
+            static_cast<double>(
+                ToneMatchAnalyzer::kSpectrumBins - 1u));
+
+    const std::size_t bin0 =
+        std::min(
+            static_cast<std::size_t>(
+                std::floor(exactBin)),
+            ToneMatchAnalyzer::kSpectrumBins - 1u);
+
+    const std::size_t bin1 =
+        std::min(
+            bin0 + 1u,
+            ToneMatchAnalyzer::kSpectrumBins - 1u);
+
+    const double fraction =
+        exactBin -
+        static_cast<double>(bin0);
+
+    const double power =
+        s.meanPower[bin0] +
+        (s.meanPower[bin1] -
+         s.meanPower[bin0]) *
+            fraction;
+
     return 10.0 *
         std::log10(
             std::max(
-                s.meanPower[
-                    binFor(
-                        s.sampleRate,
-                        frequency)],
+                power,
                 1.0e-24));
 }
 
