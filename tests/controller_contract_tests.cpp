@@ -43,7 +43,7 @@ void verifyParameterContract() {
     BF_REQUIRE(c.initialize(nullptr) == kResultOk);
     BF_REQUIRE(c.getParameterCount() == 7);
 
-    const ParamID expectedIds[] {
+    const Steinberg::Vst::ParamID expectedIds[] {
         kFinish,
         kOutput,
         kBypass,
