@@ -334,6 +334,87 @@ void verifyLowControlAndDynamicMass() {
         h3Off + 1.0e-4);
 }
 
+
+double finishThirdHarmonicAmplitude(double finishAmount) {
+    MetalFinisherDSP dsp;
+    dsp.prepare(kFs);
+    dsp.setMode(0.5);
+    dsp.setFinish(finishAmount);
+    dsp.setMass(0.0);
+    dsp.setLowCut(0.0);
+    dsp.setToneMatchAmount(0.0);
+    dsp.reset();
+
+    constexpr double fundamental = 300.0;
+    constexpr double harmonic = 900.0;
+    constexpr int total = static_cast<int>(kFs * 3.0);
+    constexpr int start = static_cast<int>(kFs * 2.0);
+
+    long double sinAcc = 0.0L;
+    long double cosAcc = 0.0L;
+    int count = 0;
+
+    for (int i = 0; i < total; ++i) {
+        const double time =
+            static_cast<double>(i) /
+            kFs;
+
+        const double x =
+            0.22 *
+            std::sin(
+                2.0 * kPi *
+                fundamental *
+                time);
+
+        double l = x;
+        double r = x;
+        dsp.processFrame(l, r);
+
+        if (i >= start) {
+            const double phase =
+                2.0 * kPi *
+                harmonic *
+                time;
+
+            sinAcc +=
+                static_cast<long double>(
+                    l * std::sin(phase));
+
+            cosAcc +=
+                static_cast<long double>(
+                    l * std::cos(phase));
+
+            ++count;
+        }
+    }
+
+    return
+        2.0 *
+        std::sqrt(
+            static_cast<double>(
+                sinAcc * sinAcc +
+                cosAcc * cosAcc)) /
+        static_cast<double>(count);
+}
+
+void verifyFinishAddsControlledHarmonics() {
+    const double h3Off =
+        finishThirdHarmonicAmplitude(0.0);
+
+    const double h3On =
+        finishThirdHarmonicAmplitude(1.0);
+
+    BF_REQUIRE(
+        h3On >
+        h3Off + 1.0e-5);
+
+    // The added harmonic should remain controlled rather than becoming a
+    // fuzz stage.
+    BF_REQUIRE(
+        h3On <
+        0.08);
+}
+
 int main() {
     verifyNeutralPathIsExact();
     verifyLowCutMappingAndResponse();
@@ -341,6 +422,7 @@ int main() {
     verifyFinishModesAreFiniteDistinctAndLevelBounded();
     verifyAutoInputAndFinalContract();
     verifyLowControlAndDynamicMass();
+    verifyFinishAddsControlledHarmonics();
     std::cout << "Bass Finisher DSP contract tests passed\n";
     return 0;
 }

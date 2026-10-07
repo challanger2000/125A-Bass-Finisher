@@ -102,6 +102,11 @@ private:
     std::array<Biquad, 2> massHarmonicHighPass_ {};
     std::array<Biquad, 2> massHarmonicLowPass_ {};
 
+    // FINISH saturation is restricted to the definition band so fundamental
+    // weight is preserved and upper-bass harmonics become more readable.
+    std::array<Biquad, 2> finishSaturationHighPass_ {};
+    std::array<Biquad, 2> finishSaturationLowPass_ {};
+
     AdaptiveBandController lowEnd_ {};
     AdaptiveBandController body_ {};
     AdaptiveBandController articulation_ {};

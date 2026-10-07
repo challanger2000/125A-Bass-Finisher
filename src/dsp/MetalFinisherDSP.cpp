@@ -31,6 +31,13 @@ constexpr double kMassHarmonicLowPassHz = 180.0;
 constexpr double kMassHarmonicDrive = 2.0;
 constexpr double kMassHarmonicMix = 0.35;
 
+// FINISH saturation works only on the definition band. It is intentionally
+// modest because adaptive correction and resonance control remain the primary
+// FINISH mechanisms.
+constexpr double kFinishSaturationHighPassHz = 110.0;
+constexpr double kFinishSaturationLowPassHz = 3600.0;
+constexpr double kFinishSaturationDrive = 1.85;
+
 // At Low Cut Off the V2 MASS curve is preserved exactly. As the user moves
 // the mix-placement high-pass upward, MASS shifts its positive weight above
 // the cut and reduces the amount of deep boost. These endpoints are
@@ -167,6 +174,18 @@ void MetalFinisherDSP::prepare(double sampleRate) {
             kMassHarmonicLowPassHz,
             0.7071067811865476);
 
+    const auto finishSaturationHighPass =
+        makeHighPass(
+            sampleRate_,
+            kFinishSaturationHighPassHz,
+            0.7071067811865476);
+
+    const auto finishSaturationLowPass =
+        makeLowPass(
+            sampleRate_,
+            kFinishSaturationLowPassHz,
+            0.7071067811865476);
+
     for (auto& filter : lowControlSubDetector_)
         filter.setCoefficients(subDetector);
 
@@ -181,6 +200,12 @@ void MetalFinisherDSP::prepare(double sampleRate) {
 
     for (auto& filter : massHarmonicLowPass_)
         filter.setCoefficients(harmonicLowPass);
+
+    for (auto& filter : finishSaturationHighPass_)
+        filter.setCoefficients(finishSaturationHighPass);
+
+    for (auto& filter : finishSaturationLowPass_)
+        filter.setCoefficients(finishSaturationLowPass);
 
     updateMassCoefficients();
 
@@ -220,6 +245,12 @@ void MetalFinisherDSP::reset() noexcept {
         filter.reset();
 
     for (auto& filter : massHarmonicLowPass_)
+        filter.reset();
+
+    for (auto& filter : finishSaturationHighPass_)
+        filter.reset();
+
+    for (auto& filter : finishSaturationLowPass_)
         filter.reset();
 
     lowControlSubPower_ = 0.0;
@@ -748,6 +779,47 @@ void MetalFinisherDSP::processFrame(
             processFrame(
                 fullLeft,
                 fullRight);
+
+        // Add controlled density/definition without saturating the deep bass.
+        // CLEAN/PUNCH/DENSE progressively increase the nonlinear residual.
+        const double saturationAmount =
+            modeTarget_ < 0.25
+                ? 0.12
+                : (modeTarget_ < 0.75
+                    ? 0.20
+                    : 0.28);
+
+        const double saturationBandLeft =
+            finishSaturationLowPass_[0].process(
+                finishSaturationHighPass_[0].process(
+                    fullLeft));
+
+        const double saturationBandRight =
+            finishSaturationLowPass_[1].process(
+                finishSaturationHighPass_[1].process(
+                    fullRight));
+
+        const double saturatedBandLeft =
+            std::tanh(
+                kFinishSaturationDrive *
+                saturationBandLeft) /
+            kFinishSaturationDrive;
+
+        const double saturatedBandRight =
+            std::tanh(
+                kFinishSaturationDrive *
+                saturationBandRight) /
+            kFinishSaturationDrive;
+
+        fullLeft +=
+            (saturatedBandLeft -
+             saturationBandLeft) *
+            saturationAmount;
+
+        fullRight +=
+            (saturatedBandRight -
+             saturationBandRight) *
+            saturationAmount;
 
         autoLevel_.processFrame(
             baseLeft,
