@@ -27,7 +27,7 @@ struct ToneMatchSpectrumSnapshot {
     // required for backwards compatibility; meanDb remains the fallback.
     bool hasTemporalCurve {false};
     std::uint32_t temporalFrameCount {0};
-    std::array<float, 128 * 128> temporalDb {};
+    std::array<float, kTemporalFrameSlots * kTemporalCurveBins> temporalDb {};
 };
 
 class ToneMatchAnalyzer {
