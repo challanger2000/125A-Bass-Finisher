@@ -796,6 +796,152 @@ void verifyNonlinearStagesRemainControlled() {
     BF_REQUIRE(ratio < 2.0);
 }
 
+
+double measuredToneAmplitude(
+    double sampleRate,
+    double fundamental,
+    double measureFrequency,
+    double inputAmplitude,
+    double finish,
+    double mass) {
+
+    MetalFinisherDSP dsp;
+    dsp.prepare(sampleRate);
+    dsp.setMode(0.5);
+    dsp.setFinish(finish);
+    dsp.setMass(mass);
+    dsp.setLowCut(0.0);
+    dsp.setToneMatchAmount(0.0);
+    dsp.reset();
+
+    const int total =
+        static_cast<int>(
+            sampleRate * 3.0);
+
+    const int start =
+        static_cast<int>(
+            sampleRate * 2.0);
+
+    long double sinAcc = 0.0L;
+    long double cosAcc = 0.0L;
+    int count = 0;
+
+    for (int i = 0; i < total; ++i) {
+        const double time =
+            static_cast<double>(i) /
+            sampleRate;
+
+        const double x =
+            inputAmplitude *
+            std::sin(
+                2.0 * kPi *
+                fundamental *
+                time);
+
+        double l = x;
+        double r = x;
+        dsp.processFrame(l, r);
+
+        if (i >= start) {
+            const double phase =
+                2.0 * kPi *
+                measureFrequency *
+                time;
+
+            sinAcc +=
+                static_cast<long double>(
+                    l * std::sin(phase));
+
+            cosAcc +=
+                static_cast<long double>(
+                    l * std::cos(phase));
+
+            ++count;
+        }
+    }
+
+    return
+        2.0 *
+        std::sqrt(
+            static_cast<double>(
+                sinAcc * sinAcc +
+                cosAcc * cosAcc)) /
+        static_cast<double>(count);
+}
+
+void verifyFinishAliasRiskIsBounded() {
+    // 3.5 kHz is near the top of the FINISH saturation band. At 48 kHz,
+    // the 7th harmonic (24.5 kHz) folds to 23.5 kHz, so this is a useful
+    // worst-case alias probe for deciding whether oversampling is warranted.
+    constexpr double fundamental = 3500.0;
+    constexpr double inputAmplitude = 0.22;
+
+    const double fundamentalAmp =
+        measuredToneAmplitude(
+            48000.0,
+            fundamental,
+            fundamental,
+            inputAmplitude,
+            1.0,
+            0.0);
+
+    const double aliasAmp =
+        measuredToneAmplitude(
+            48000.0,
+            fundamental,
+            23500.0,
+            inputAmplitude,
+            1.0,
+            0.0);
+
+    BF_REQUIRE(fundamentalAmp > 1.0e-6);
+    BF_REQUIRE(aliasAmp >= 0.0);
+
+    const double aliasDbc =
+        20.0 *
+        std::log10(
+            std::max(
+                aliasAmp /
+                    fundamentalAmp,
+                1.0e-15));
+
+    // This is intentionally a permissive release guard. If we exceed it,
+    // oversampling or a narrower nonlinear band becomes justified by data.
+    BF_REQUIRE(aliasDbc < -35.0);
+
+    // MASS is confined to the low bass; a 180 Hz upper-band probe must have
+    // negligible energy near Nyquist even without oversampling.
+    const double massFundamental =
+        measuredToneAmplitude(
+            48000.0,
+            180.0,
+            180.0,
+            0.45,
+            0.0,
+            1.0);
+
+    const double massNearNyquist =
+        measuredToneAmplitude(
+            48000.0,
+            180.0,
+            23000.0,
+            0.45,
+            0.0,
+            1.0);
+
+    BF_REQUIRE(massFundamental > 1.0e-6);
+
+    const double massNyquistDbc =
+        20.0 *
+        std::log10(
+            std::max(
+                massNearNyquist /
+                    massFundamental,
+                1.0e-15));
+
+    BF_REQUIRE(massNyquistDbc < -70.0);
+}
+
 int main() {
     verifyNeutralPathIsExact();
     verifyLowCutMappingAndResponse();
@@ -807,6 +953,7 @@ int main() {
     verifySampleRatesExtremesAndStereoLink();
     verifyPathologicalInputsRecover();
     verifyNonlinearStagesRemainControlled();
+    verifyFinishAliasRiskIsBounded();
     std::cout << "Bass Finisher DSP contract tests passed\n";
     return 0;
 }
