@@ -18,7 +18,7 @@ struct ToneMatchStatePayload {
 inline bool readToneMatchState(
     Steinberg::IBStreamer& stream,
     ToneMatchStatePayload& payload,
-    Steinberg::int32 stateVersion = 2) noexcept {
+    Steinberg::int32 stateVersion = 4) noexcept {
 
     ToneMatchStatePayload next {};
 
@@ -87,6 +87,25 @@ inline bool readToneMatchState(
         return false;
     }
 
+    if (stateVersion >= 4) {
+        Steinberg::int32 firValid = 0;
+
+        if (!stream.readInt32(firValid) ||
+            (firValid != 0 &&
+             firValid != 1)) {
+            return false;
+        }
+
+        next.profile.firValid =
+            firValid != 0;
+
+        for (double& tap :
+             next.profile.firTaps) {
+            if (!readFinite(tap))
+                return false;
+        }
+    }
+
     next.amount =
         std::clamp(
             next.amount,
@@ -142,11 +161,27 @@ inline bool writeToneMatchState(
         }
     }
 
-    return
-        writeFinite(
-            payload.profile.highShelfFrequencyHz) &&
-        writeFinite(
-            payload.profile.highShelfGainDb);
+    if (!writeFinite(
+            payload.profile.highShelfFrequencyHz) ||
+        !writeFinite(
+            payload.profile.highShelfGainDb)) {
+        return false;
+    }
+
+    if (!stream.writeInt32(
+            payload.profile.firValid
+                ? 1
+                : 0)) {
+        return false;
+    }
+
+    for (const double tap :
+         payload.profile.firTaps) {
+        if (!writeFinite(tap))
+            return false;
+    }
+
+    return true;
 }
 
 inline bool writeToneMatchReferenceState(

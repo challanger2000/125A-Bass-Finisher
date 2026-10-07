@@ -51,6 +51,10 @@ void ToneMatchDSP::resetFilters() noexcept {
 
     for (auto& filter : highShelf_)
         filter.reset();
+
+    firHistoryLeft_.fill(0.0);
+    firHistoryRight_.fill(0.0);
+    firWriteIndex_ = 0;
 }
 
 void ToneMatchDSP::reset() noexcept {
@@ -172,6 +176,27 @@ void ToneMatchDSP::sanitizeProfile(
                 0.0),
             -kMaximumGainDb,
             kMaximumGainDb);
+
+    if (profile_.firValid) {
+        bool anyEnergy = false;
+
+        for (double& tap :
+             profile_.firTaps) {
+
+            tap =
+                std::clamp(
+                    finiteOr(tap, 0.0),
+                    -8.0,
+                    8.0);
+
+            anyEnergy =
+                anyEnergy ||
+                std::abs(tap) > 1.0e-15;
+        }
+
+        if (!anyEnergy)
+            profile_.firValid = false;
+    }
 }
 
 void ToneMatchDSP::setProfile(
@@ -268,6 +293,32 @@ void ToneMatchDSP::updateCoefficients(
         kCoefficientUpdateInterval;
 }
 
+double ToneMatchDSP::processFirSample(
+    double input,
+    std::array<double, 2 * kToneMatchFirTapCount>& history) noexcept {
+
+    history[firWriteIndex_] = input;
+    history[firWriteIndex_ + kToneMatchFirTapCount] = input;
+
+    const double* samples =
+        history.data() + firWriteIndex_;
+
+    double sum = 0.0;
+
+    for (std::size_t i = 0;
+         i < kToneMatchFirTapCount;
+         ++i) {
+
+        sum +=
+            profile_.firTaps[i] *
+            samples[i];
+    }
+
+    return std::isfinite(sum)
+        ? sum
+        : 0.0;
+}
+
 void ToneMatchDSP::processFrame(
     double& left,
     double& right) noexcept {
@@ -313,35 +364,65 @@ void ToneMatchDSP::processFrame(
 
     bypassState_ = false;
 
-    if (--coefficientCountdown_ <= 0 ||
-        std::abs(
-            amountSmoothed_ -
-            lastCoefficientAmount_) >
-            0.005) {
+    if (profile_.firValid) {
+        firWriteIndex_ =
+            (firWriteIndex_ +
+             kToneMatchFirTapCount - 1u) %
+            kToneMatchFirTapCount;
 
-        updateCoefficients(
-            amountSmoothed_);
-    }
+        const double dryLeft = left;
+        const double dryRight = right;
 
-    left =
-        lowShelf_[0].process(left);
+        const double wetLeft =
+            processFirSample(
+                dryLeft,
+                firHistoryLeft_);
 
-    right =
-        lowShelf_[1].process(right);
+        const double wetRight =
+            processFirSample(
+                dryRight,
+                firHistoryRight_);
 
-    for (auto& band : peaks_) {
         left =
-            band[0].process(left);
+            dryLeft +
+            (wetLeft - dryLeft) *
+                amountSmoothed_;
 
         right =
-            band[1].process(right);
+            dryRight +
+            (wetRight - dryRight) *
+                amountSmoothed_;
+    } else {
+        if (--coefficientCountdown_ <= 0 ||
+            std::abs(
+                amountSmoothed_ -
+                lastCoefficientAmount_) >
+                0.005) {
+
+            updateCoefficients(
+                amountSmoothed_);
+        }
+
+        left =
+            lowShelf_[0].process(left);
+
+        right =
+            lowShelf_[1].process(right);
+
+        for (auto& band : peaks_) {
+            left =
+                band[0].process(left);
+
+            right =
+                band[1].process(right);
+        }
+
+        left =
+            highShelf_[0].process(left);
+
+        right =
+            highShelf_[1].process(right);
     }
-
-    left =
-        highShelf_[0].process(left);
-
-    right =
-        highShelf_[1].process(right);
 
     if (!std::isfinite(left))
         left = 0.0;

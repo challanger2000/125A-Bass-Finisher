@@ -59,6 +59,10 @@ std::string ToneMatchProfileCodec::encode(
         << (profile.valid ? 1 : 0)
         << "\n";
 
+    out << "firValid="
+        << (profile.firValid ? 1 : 0)
+        << "\n";
+
     out << "lowShelfHz="
         << profile.lowShelfFrequencyHz
         << "\n";
@@ -95,6 +99,15 @@ std::string ToneMatchProfileCodec::encode(
         << profile.highShelfGainDb
         << "\n";
 
+    for (std::size_t i = 0;
+         i < profile.firTaps.size();
+         ++i) {
+
+        out << "fir" << i << "="
+            << profile.firTaps[i]
+            << "\n";
+    }
+
     return out.str();
 }
 
@@ -115,6 +128,7 @@ bool ToneMatchProfileCodec::decode(
         bool sawVersion = false;
         int decodedVersion = 0;
         bool sawValid = false;
+        bool sawFirValid = false;
         bool sawLowHz = false;
         bool sawLowDb = false;
         bool sawHighHz = false;
@@ -164,6 +178,37 @@ bool ToneMatchProfileCodec::decode(
                 next.valid =
                     value >= 0.5;
                 sawValid = true;
+                continue;
+            }
+
+            if (key == "firValid") {
+                if (value != 0.0 &&
+                    value != 1.0) {
+                    return false;
+                }
+
+                next.firValid =
+                    value >= 0.5;
+
+                sawFirValid = true;
+                continue;
+            }
+
+            if (key.rfind("fir", 0) == 0 &&
+                key.size() > 3) {
+
+                const auto index =
+                    static_cast<std::size_t>(
+                        std::stoull(
+                            key.substr(3)));
+
+                if (index >=
+                    next.firTaps.size()) {
+                    return false;
+                }
+
+                next.firTaps[index] =
+                    value;
                 continue;
             }
 
@@ -236,6 +281,8 @@ bool ToneMatchProfileCodec::decode(
 
         if (!sawVersion ||
             !sawValid ||
+            (decodedVersion >= 3 &&
+             !sawFirValid) ||
             !sawLowHz ||
             !sawLowDb ||
             !sawHighHz ||
@@ -266,6 +313,11 @@ bool ToneMatchProfileCodec::decode(
             next.peaks[i].frequencyHz = 1000.0;
             next.peaks[i].q = 1.0;
             next.peaks[i].gainDb = 0.0;
+        }
+
+        if (decodedVersion < 3) {
+            next.firValid = false;
+            next.firTaps.fill(0.0);
         }
 
         profile = next;

@@ -55,7 +55,7 @@ void verifyCoreValues(
 }
 
 int main(){
-    BF_REQUIRE(kStateVersion==3);
+    BF_REQUIRE(kStateVersion==4);
     BF_REQUIRE(kFirstSupportedStateVersion==1);
 
     MemoryStream state;
@@ -67,6 +67,9 @@ int main(){
     ToneMatchStatePayload tm{};
     tm.amount=0.44;
     tm.profile.valid=true;
+    tm.profile.firValid=true;
+    tm.profile.firTaps.fill(0.0);
+    tm.profile.firTaps[0]=1.0;
     tm.profile.lowShelfFrequencyHz=72.0;
     tm.profile.lowShelfGainDb=1.2;
     tm.profile.highShelfFrequencyHz=6200.0;
@@ -96,7 +99,7 @@ int main(){
     IBStreamer r(&saved,kLittleEndian);
     int32 version=0;
     BF_REQUIRE(r.readInt32(version));
-    BF_REQUIRE(version==3);
+    BF_REQUIRE(version==4);
 
     double restored[6]{};
     for(double& v:restored) BF_REQUIRE(r.readDouble(v));
@@ -106,6 +109,11 @@ int main(){
     BF_REQUIRE(readToneMatchState(r,tm2,kStateVersion));
     BF_REQUIRE(std::abs(tm2.amount-tm.amount)<1.0e-12);
     BF_REQUIRE(tm2.profile.valid);
+    BF_REQUIRE(tm2.profile.firValid);
+    BF_REQUIRE(
+        std::abs(
+            tm2.profile.firTaps[0] - 1.0) <
+        1.0e-12);
 
     dsp::ToneMatchSpectrumSnapshot ref2{};
     BF_REQUIRE(readToneMatchReferenceState(r,ref2,kStateVersion));

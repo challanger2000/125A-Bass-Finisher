@@ -6,6 +6,7 @@
 namespace HighGainGuitarFinisher::dsp {
 
 constexpr std::size_t kToneMatchPeakCount = 64;
+constexpr std::size_t kToneMatchFirTapCount = 2048;
 
 struct ToneMatchPeak {
     double frequencyHz {1000.0};
@@ -15,6 +16,11 @@ struct ToneMatchPeak {
 
 struct ToneMatchProfile {
     bool valid {false};
+
+    // Direct-curve MATCH path. Legacy IIR fields remain for backwards
+    // compatibility with saved V1/V2/V3 projects and old profile files.
+    bool firValid {false};
+    std::array<double, kToneMatchFirTapCount> firTaps {};
 
     double lowShelfFrequencyHz {100.0};
     double lowShelfGainDb {0.0};
