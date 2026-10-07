@@ -106,6 +106,61 @@ double sampleDb(
                 1.0e-24));
 }
 
+double biquadMagnitudeDb(
+    const BiquadCoefficients& coefficients,
+    double sampleRate,
+    double frequency) {
+
+    constexpr double kPi =
+        3.141592653589793238462643383279502884;
+
+    const double omega =
+        2.0 * kPi * frequency / sampleRate;
+
+    const double cos1 = std::cos(omega);
+    const double sin1 = std::sin(omega);
+    const double cos2 = std::cos(2.0 * omega);
+    const double sin2 = std::sin(2.0 * omega);
+
+    const double numeratorReal =
+        coefficients.b0 +
+        coefficients.b1 * cos1 +
+        coefficients.b2 * cos2;
+
+    const double numeratorImag =
+        -coefficients.b1 * sin1 -
+        coefficients.b2 * sin2;
+
+    const double denominatorReal =
+        1.0 +
+        coefficients.a1 * cos1 +
+        coefficients.a2 * cos2;
+
+    const double denominatorImag =
+        -coefficients.a1 * sin1 -
+        coefficients.a2 * sin2;
+
+    const double numeratorPower =
+        numeratorReal * numeratorReal +
+        numeratorImag * numeratorImag;
+
+    const double denominatorPower =
+        denominatorReal * denominatorReal +
+        denominatorImag * denominatorImag;
+
+    const double magnitude =
+        std::sqrt(
+            std::max(
+                numeratorPower /
+                std::max(
+                    denominatorPower,
+                    1.0e-30),
+                1.0e-30));
+
+    return 20.0 *
+        std::log10(magnitude);
+}
+
 double responseDb(
     const ToneMatchProfile& p,
     double sampleRate,
