@@ -1004,12 +1004,27 @@ ToneMatchAnalyzer::makeProfile(
                     35.0,
                     maximumMatchHz);
 
+            std::array<double, 5> local {
+                rawDifferenceAt(f / 1.18),
+                rawDifferenceAt(f / 1.08),
+                rawDifferenceAt(f),
+                rawDifferenceAt(f * 1.08),
+                rawDifferenceAt(f * 1.18)
+            };
+
+            // Robust local estimate: discard the largest and smallest
+            // difference value. A single FFT-bin spike therefore cannot
+            // become an audible FIR resonance, while a broad spectral
+            // difference still appears in the remaining three samples.
+            std::sort(
+                local.begin(),
+                local.end());
+
             const double value =
-                0.12 * rawDifferenceAt(f / 1.18) +
-                0.20 * rawDifferenceAt(f / 1.08) +
-                0.36 * rawDifferenceAt(f) +
-                0.20 * rawDifferenceAt(f * 1.08) +
-                0.12 * rawDifferenceAt(f * 1.18);
+                (local[1] +
+                 local[2] +
+                 local[3]) /
+                3.0;
 
             return std::clamp(
                 value,
