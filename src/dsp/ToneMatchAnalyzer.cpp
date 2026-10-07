@@ -604,7 +604,7 @@ double profileFitError(
     double sampleRate,
     const DesiredCurve& desiredAt) noexcept {
 
-    constexpr std::size_t kFitPointCount = 96u;
+    constexpr std::size_t kFitPointCount = 128u;
     constexpr double kMinimumFitHz = 30.0;
     constexpr double kMaximumFitHz = 3500.0;
 
@@ -663,8 +663,8 @@ void refineProfileGains(
     // Offline/controller-side coordinate descent. The realtime topology stays
     // exactly the same; this only chooses gains that account for the actual
     // summed response of the overlapping shelves and peaking filters.
-    constexpr std::array<double, 5> steps {
-        2.0, 1.0, 0.5, 0.25, 0.125
+    constexpr std::array<double, 6> steps {
+        2.0, 1.0, 0.5, 0.25, 0.125, 0.0625
     };
 
     auto optimizeGain =
@@ -782,14 +782,14 @@ void refineProfileGains(
             }
         };
 
-    static constexpr std::array<double, 4>
+    static constexpr std::array<double, 5>
         lowShelfSteps {
-            10.0, 5.0, 2.5, 1.25
+            10.0, 5.0, 2.5, 1.25, 0.625
         };
 
-    static constexpr std::array<double, 4>
+    static constexpr std::array<double, 5>
         highShelfSteps {
-            500.0, 250.0, 125.0, 62.5
+            500.0, 250.0, 125.0, 62.5, 31.25
         };
 
     optimizeFrequency(
@@ -881,24 +881,24 @@ ToneMatchAnalyzer::makeProfile(
     };
 
     static constexpr std::array<double, kToneMatchPeakCount> zoneWeight {
-        0.80, 0.90, 1.00, 1.00,
         1.00, 1.00, 1.00, 1.00,
-        0.95, 0.92, 0.92, 0.96,
-        1.00, 0.92, 0.68, 0.42
+        1.00, 1.00, 1.00, 1.00,
+        1.00, 1.00, 1.00, 1.00,
+        1.00, 1.00, 1.00, 1.00
     };
 
     static constexpr std::array<double, kToneMatchPeakCount> maximumBoostDb {
-        1.5, 2.0, 2.6, 3.2,
-        3.8, 4.2, 4.4, 4.4,
-        4.2, 4.0, 4.0, 4.2,
-        4.4, 4.0, 3.0, 2.0
+        1.5, 2.0, 3.0, 5.5,
+        6.0, 6.0, 6.0, 6.0,
+        6.0, 6.0, 6.0, 6.0,
+        6.0, 6.0, 5.5, 5.0
     };
 
     static constexpr std::array<double, kToneMatchPeakCount> maximumCutDb {
-        3.0, 3.4, 3.8, 4.2,
-        4.6, 4.8, 5.0, 5.0,
-        4.8, 4.6, 4.5, 4.5,
-        4.5, 4.2, 3.6, 2.8
+        4.0, 5.0, 6.0, 6.0,
+        6.5, 6.5, 6.5, 6.5,
+        6.5, 6.5, 6.5, 6.5,
+        6.5, 6.5, 6.0, 5.5
     };
 
     const double referencePeakDb =
@@ -971,36 +971,10 @@ ToneMatchAnalyzer::makeProfile(
             0.15 * rawDifferenceAt(center * 1.30);
     }
 
-    // Explicit broad-curve smoothing before any protection limits. Two
-    // [0.25, 0.50, 0.25] passes suppress narrow reference features while
-    // preserving the large-scale bass tonal shape.
-    for (int pass = 0; pass < 2; ++pass) {
-        const auto previous =
-            zoneDifference;
-
-        for (std::size_t i = 0;
-             i < zoneDifference.size();
-             ++i) {
-
-            const double left =
-                previous[
-                    i > 0
-                        ? i - 1
-                        : i];
-
-            const double right =
-                previous[
-                    i + 1 <
-                            previous.size()
-                        ? i + 1
-                        : i];
-
-            zoneDifference[i] =
-                0.25 * left +
-                0.50 * previous[i] +
-                0.25 * right;
-        }
-    }
+    // The five-point log-frequency neighbourhood above is the deliberate
+    // anti-resonance smoothing stage. Do not smooth the 16-zone curve again:
+    // a second broad blur made MATCH stop short of the reference even at 100%.
+    // Protection below is now limited to explicit safety bounds.
 
     std::array<double, kToneMatchPeakCount>
         protectedDesired {};
@@ -1080,8 +1054,8 @@ ToneMatchAnalyzer::makeProfile(
         std::clamp(
             0.65 * protectedDesired[0] +
             0.35 * protectedDesired[1],
-            -3.0,
-            1.5);
+            -5.0,
+            3.0);
 
     for (std::size_t i = 0;
          i < centers.size();
@@ -1106,8 +1080,8 @@ ToneMatchAnalyzer::makeProfile(
             0.35 * protectedDesired[
                 protectedDesired.size() - 2] +
             0.65 * protectedDesired.back(),
-            -2.5,
-            1.5);
+            -5.0,
+            4.0);
 
     // Solve against the protected smoothed target curve using the actual
     // combined response of every overlapping shelf and peaking filter.
@@ -1117,7 +1091,7 @@ ToneMatchAnalyzer::makeProfile(
         desiredAt);
 
     profile.lowShelfGainDb =
-        std::clamp(profile.lowShelfGainDb, -3.0, 1.5);
+        std::clamp(profile.lowShelfGainDb, -5.0, 3.0);
 
     for (std::size_t i = 0; i < profile.peaks.size(); ++i) {
         profile.peaks[i].gainDb =
@@ -1128,9 +1102,9 @@ ToneMatchAnalyzer::makeProfile(
     }
 
     profile.highShelfGainDb =
-        std::clamp(profile.highShelfGainDb, -2.5, 1.5);
+        std::clamp(profile.highShelfGainDb, -5.0, 4.0);
 
-    constexpr double kMaximumAdjacentStepDb = 1.6;
+    constexpr double kMaximumAdjacentStepDb = 3.0;
 
     for (std::size_t i = 1; i < profile.peaks.size(); ++i) {
         profile.peaks[i].gainDb =

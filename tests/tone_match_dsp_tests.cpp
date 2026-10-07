@@ -84,6 +84,87 @@ void verifyAmountLawAndRates() {
     }
 }
 
+
+ToneMatchProfile bassPeakProfile() {
+    ToneMatchProfile p {};
+    p.valid = true;
+    p.lowShelfFrequencyHz = 60.0;
+    p.lowShelfGainDb = 2.5;
+
+    for (auto& peak : p.peaks) {
+        peak.frequencyHz = 1000.0;
+        peak.q = 1.0;
+        peak.gainDb = 0.0;
+    }
+
+    p.peaks[0].frequencyHz = 100.0;
+    p.peaks[0].q = 0.85;
+    p.peaks[0].gainDb = 4.0;
+    return p;
+}
+
+double bassContextRms(
+    double lowCutContext,
+    double massContext) {
+
+    ToneMatchDSP dsp;
+    dsp.prepare(48000.0);
+    dsp.setProfile(bassPeakProfile());
+    dsp.setAmount(1.0);
+    dsp.setBassContext(
+        lowCutContext,
+        massContext);
+    dsp.reset();
+
+    constexpr double fs = 48000.0;
+    constexpr double f = 100.0;
+    constexpr int total = 96000;
+    constexpr int start = 48000;
+
+    long double power = 0.0L;
+    int count = 0;
+
+    for (int i = 0; i < total; ++i) {
+        double l =
+            0.05 *
+            std::sin(
+                2.0 * kPi * f *
+                static_cast<double>(i) /
+                fs);
+        double r = l;
+
+        dsp.processFrame(l, r);
+
+        if (i >= start) {
+            power +=
+                0.5L *
+                (l * l + r * r);
+            ++count;
+        }
+    }
+
+    return std::sqrt(
+        static_cast<double>(
+            power /
+            static_cast<long double>(
+                count)));
+}
+
+void verifyBassContextDoesNotWeakenMatch() {
+    const double neutral =
+        bassContextRms(0.0, 0.0);
+
+    const double downstreamMax =
+        bassContextRms(1.0, 1.0);
+
+    BF_REQUIRE(neutral > 0.0);
+    BF_REQUIRE(
+        std::abs(
+            downstreamMax -
+            neutral) <
+        1.0e-12);
+}
+
 void verifySanitization() {
     ToneMatchDSP dsp;
     dsp.prepare(48000.0);
@@ -111,6 +192,7 @@ void verifySanitization() {
 int main() {
     verifyZeroExact();
     verifyAmountLawAndRates();
+    verifyBassContextDoesNotWeakenMatch();
     verifySanitization();
     std::cout << "Bass Finisher Tone Match core tests passed\n";
     return 0;

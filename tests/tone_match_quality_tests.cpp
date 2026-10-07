@@ -19,10 +19,10 @@ constexpr std::array<double, 16> kZones {
 };
 
 constexpr std::array<double, 16> kWeights {
-    0.80, 0.90, 1.00, 1.00,
     1.00, 1.00, 1.00, 1.00,
-    0.95, 0.92, 0.92, 0.96,
-    1.00, 0.92, 0.68, 0.42
+    1.00, 1.00, 1.00, 1.00,
+    1.00, 1.00, 1.00, 1.00,
+    1.00, 1.00, 1.00, 1.00
 };
 
 std::size_t binFor(double sampleRate, double frequency) {
@@ -271,9 +271,17 @@ void verifyDistanceImproves() {
             target,
             &profile);
 
-    BF_REQUIRE(
-        after <
-        before * 0.80);
+    std::cout
+        << "MATCH distance: before="
+        << before
+        << " dB, after="
+        << after
+        << " dB\n";
+
+    // Improvement alone is not enough for a matcher. At 100% the protected
+    // solver must land close to the synthetic reference curve.
+    BF_REQUIRE(after < 0.80);
+    BF_REQUIRE(after < before * 0.40);
 }
 
 void verifyNarrowSpikeIsRejected() {

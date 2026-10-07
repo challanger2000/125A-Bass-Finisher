@@ -91,19 +91,12 @@ void ToneMatchDSP::setBassContext(
     double lowCutNormalized,
     double massNormalized) noexcept {
 
-    lowCutContext_ =
-        std::clamp(
-            finiteOr(lowCutNormalized, 0.0),
-            0.0,
-            1.0);
-
-    massContext_ =
-        std::clamp(
-            finiteOr(massNormalized, 0.0),
-            0.0,
-            1.0);
-
-    coefficientCountdown_ = 0;
+    // MATCH is intentionally independent from downstream mix-placement
+    // stages. LOW CONTROL and MASS process the already matched signal later
+    // in MetalFinisherDSP; they must not make 100% MATCH stop short of the
+    // reference curve.
+    (void)lowCutNormalized;
+    (void)massNormalized;
 }
 
 void ToneMatchDSP::sanitizeProfile(
@@ -217,20 +210,8 @@ void ToneMatchDSP::updateCoefficients(
             0.0,
             1.0);
 
-    double lowShelfGainDb =
+    const double lowShelfGainDb =
         profile_.lowShelfGainDb;
-
-    if (lowShelfGainDb > 0.0) {
-        lowShelfGainDb *=
-            std::clamp(
-                1.0 - 0.80 * lowCutContext_,
-                0.20,
-                1.0) *
-            std::clamp(
-                1.0 - 0.40 * massContext_,
-                0.60,
-                1.0);
-    }
 
     const auto low =
         makeLowShelf(
@@ -261,20 +242,6 @@ void ToneMatchDSP::updateCoefficients(
 
         const double peakFrequencyHz =
             profile_.peaks[band].frequencyHz;
-
-        if (peakGainDb > 0.0 &&
-            peakFrequencyHz < 180.0) {
-
-            peakGainDb *=
-                std::clamp(
-                    1.0 - 0.75 * lowCutContext_,
-                    0.25,
-                    1.0) *
-                std::clamp(
-                    1.0 - 0.35 * massContext_,
-                    0.65,
-                    1.0);
-        }
 
         const auto coefficients =
             makePeaking(
