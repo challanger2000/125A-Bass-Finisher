@@ -73,7 +73,11 @@ int main(){
 
     dsp::ToneMatchSpectrumSnapshot ref2{};
     BF_REQUIRE(readToneMatchReferenceState(r,ref2));
-    BF_REQUIRE(ref2.frameCount==ref.frameCount);
+    // Reference-state IO persists the analyzed spectrum, not the original
+    // analyzer frame counter. A restored valid snapshot is canonicalized to
+    // the minimum-ready frame count.
+    BF_REQUIRE(ref2.frameCount>=4u);
+    BF_REQUIRE(ref2.sampleRate==ref.sampleRate);
     BF_REQUIRE(ref2.meanPower==ref.meanPower);
 
     MemoryStream bad;
