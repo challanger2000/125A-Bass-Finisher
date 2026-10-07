@@ -1,0 +1,98 @@
+name: Bass Finisher Release Plugin Tester
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v1.0.0-engineering
+    paths:
+      - ".github/workflows/release-plugin-tester.yml"
+
+jobs:
+  plugin-tester:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout Bass Finisher
+        uses: actions/checkout@v4
+
+      - name: Configure Bass Finisher
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Bass Finisher
+        run: cmake --build build --config Release --target BassFinisher --parallel
+
+      - name: Locate Bass Finisher VST3
+        id: bass
+        shell: pwsh
+        run: |
+          $plugin = Get-ChildItem -Path build -Recurse -Directory -Filter "125A-Bass-Finisher-V1.vst3" | Select-Object -First 1
+          if (-not $plugin) { throw "125A-Bass-Finisher-V1.vst3 bundle not found" }
+          "plugin=$($plugin.FullName)" >> $env:GITHUB_OUTPUT
+          Write-Host "Testing exact bundle: $($plugin.FullName)"
+
+      - name: Checkout 125A Plugin Tester v0.2.9 source
+        uses: actions/checkout@v4
+        with:
+          repository: challanger2000/125A-Plugin-Tester-Final
+          ref: fd246146994384e301c735e7d860b53aa06b18c5
+          path: _plugin-tester
+
+      - name: Configure 125A Plugin Tester
+        shell: pwsh
+        run: |
+          $prefix = Join-Path (Get-Location) "_plugin-tester-installed"
+          cmake -S _plugin-tester -B _plugin-tester/build -G "Visual Studio 17 2022" -A x64 -DCMAKE_INSTALL_PREFIX="$prefix" -DSMTG_CREATE_PLUGIN_LINK=0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build and install 125A Plugin Tester
+        run: cmake --build _plugin-tester/build --config Release --target install --parallel
+
+      - name: Run 125A Plugin Tester v0.2.9
+        shell: pwsh
+        env:
+          BASS_PLUGIN: ${{ steps.bass.outputs.plugin }}
+        run: |
+          $tester = Get-ChildItem "_plugin-tester-installed" -Recurse -File -Filter "125A_Plugin_Tester.exe" | Select-Object -First 1
+          if (-not $tester) { throw "125A_Plugin_Tester.exe not found after install" }
+
+          $env:125A_PLUGIN_TESTER_REPORT_DIR = Join-Path (Get-Location) "plugin-tester-reports"
+          Remove-Item $env:125A_PLUGIN_TESTER_REPORT_DIR -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $env:125A_PLUGIN_TESTER_REPORT_DIR | Out-Null
+
+          Write-Host "Running $($tester.FullName)"
+          Write-Host "Against $env:BASS_PLUGIN"
+
+          $process = Start-Process -FilePath $tester.FullName -ArgumentList @($env:BASS_PLUGIN) -Wait -PassThru
+          Write-Host "125A Plugin Tester exit code: $($process.ExitCode)"
+
+          $report = Get-ChildItem $env:125A_PLUGIN_TESTER_REPORT_DIR -File -Filter "*_125A_QA_Report.txt" | Select-Object -First 1
+          $json = Get-ChildItem $env:125A_PLUGIN_TESTER_REPORT_DIR -File -Filter "*_125A_QA_Report.json" | Select-Object -First 1
+
+          if ($report) {
+            Write-Host "----- 125A QA REPORT -----"
+            Get-Content $report.FullName -Raw | Write-Host
+            Write-Host "----- END 125A QA REPORT -----"
+          }
+
+          if (-not $report) { throw "125A Plugin Tester did not produce a QA report" }
+          if (-not $json) { throw "125A Plugin Tester did not produce a JSON QA report" }
+
+          $data = Get-Content $json.FullName -Raw | ConvertFrom-Json
+          if ($data.status -ne "PASS") {
+            throw "125A Plugin Tester result was $($data.status), expected PASS"
+          }
+
+          if ($process.ExitCode -ne 0) {
+            throw "125A Plugin Tester returned exit code $($process.ExitCode)"
+          }
+
+          Write-Host "125A PLUGIN TESTER v0.2.9: PASS"
+
+      - name: Upload 125A Plugin Tester reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 125A-Bass-Finisher-Plugin-Tester-Reports
+          path: plugin-tester-reports/*
+          if-no-files-found: warn
