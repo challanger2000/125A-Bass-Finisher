@@ -143,9 +143,11 @@ inline bool parseToneMatchReferenceSpectrumMessage(
 }
 
 struct ToneMatchProfileMessagePayload {
-    std::uint32_t version {1u};
+    std::uint32_t version {2u};
     std::int32_t valid {0};
+    std::int32_t firValid {0};
     std::array<double, 4 + 3 * dsp::kToneMatchPeakCount> values {};
+    std::array<double, dsp::kToneMatchFirTapCount> firTaps {};
 };
 
 inline ToneMatchProfileMessagePayload
@@ -154,6 +156,8 @@ makeToneMatchProfileMessage(
 
     ToneMatchProfileMessagePayload payload {};
     payload.valid = profile.valid ? 1 : 0;
+    payload.firValid = profile.firValid ? 1 : 0;
+    payload.firTaps = profile.firTaps;
 
     std::size_t i = 0;
     payload.values[i++] = profile.lowShelfFrequencyHz;
@@ -175,9 +179,11 @@ inline bool parseToneMatchProfileMessage(
     const ToneMatchProfileMessagePayload& payload,
     dsp::ToneMatchProfile& profile) noexcept {
 
-    if (payload.version != 1u ||
+    if (payload.version != 2u ||
         (payload.valid != 0 &&
-         payload.valid != 1)) {
+         payload.valid != 1) ||
+        (payload.firValid != 0 &&
+         payload.firValid != 1)) {
         return false;
     }
 
@@ -186,8 +192,15 @@ inline bool parseToneMatchProfileMessage(
             return false;
     }
 
+    for (const double tap : payload.firTaps) {
+        if (!std::isfinite(tap))
+            return false;
+    }
+
     dsp::ToneMatchProfile next {};
     next.valid = payload.valid != 0;
+    next.firValid = payload.firValid != 0;
+    next.firTaps = payload.firTaps;
 
     std::size_t i = 0;
     next.lowShelfFrequencyHz = payload.values[i++];

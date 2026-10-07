@@ -172,6 +172,43 @@ double responseDb(
     double sampleRate,
     double frequency) {
 
+    if (p.firValid) {
+        constexpr double pi =
+            3.14159265358979323846;
+
+        double real = 0.0;
+        double imag = 0.0;
+
+        const double omega =
+            2.0 * pi *
+            frequency /
+            sampleRate;
+
+        for (std::size_t i = 0;
+             i < p.firTaps.size();
+             ++i) {
+            const double phase =
+                -omega *
+                static_cast<double>(i);
+
+            real +=
+                p.firTaps[i] *
+                std::cos(phase);
+
+            imag +=
+                p.firTaps[i] *
+                std::sin(phase);
+        }
+
+        return 20.0 *
+            std::log10(
+                std::max(
+                    std::sqrt(
+                        real * real +
+                        imag * imag),
+                    1.0e-12));
+    }
+
     double result =
         biquadMagnitudeDb(
             makeLowShelf(
@@ -286,8 +323,9 @@ void verifyDistanceImproves() {
 
     // Improvement alone is not enough for a matcher. At 100% the protected
     // solver must land close to the synthetic reference curve.
-    BF_REQUIRE(after < 0.75);
-    BF_REQUIRE(after < before * 0.35);
+    BF_REQUIRE(profile.firValid);
+    BF_REQUIRE(after < 0.55);
+    BF_REQUIRE(after < before * 0.30);
 }
 
 void verifyNarrowSpikeIsRejected() {
@@ -310,16 +348,13 @@ void verifyNarrowSpikeIsRejected() {
 
     BF_REQUIRE(profile.valid);
 
-    double maximumBoost = 0.0;
-
-    for (const auto& peak : profile.peaks) {
-        maximumBoost =
-            std::max(
-                maximumBoost,
-                peak.gainDb);
-    }
-
-    BF_REQUIRE(maximumBoost < 3.0);
+    BF_REQUIRE(profile.firValid);
+    BF_REQUIRE(
+        responseDb(
+            profile,
+            48000.0,
+            1000.0) <
+        3.0);
 }
 
 void verifySubBoostProtection() {
@@ -346,9 +381,13 @@ void verifySubBoostProtection() {
             target);
 
     BF_REQUIRE(profile.valid);
-    BF_REQUIRE(profile.lowShelfGainDb <= 1.500001);
-    BF_REQUIRE(profile.peaks[0].gainDb <= 1.500001);
-    BF_REQUIRE(profile.peaks[1].gainDb <= 2.000001);
+    BF_REQUIRE(profile.firValid);
+    BF_REQUIRE(
+        responseDb(
+            profile,
+            48000.0,
+            40.0) <=
+        2.5);
 }
 
 }
@@ -380,33 +419,23 @@ void verifyAbsoluteLevelIsNotTone() {
 
     BF_REQUIRE(profile.valid);
 
+    BF_REQUIRE(profile.firValid);
+
     double maximumMagnitude = 0.0;
 
-    maximumMagnitude =
-        std::max(
-            maximumMagnitude,
-            std::abs(
-                profile.lowShelfGainDb));
-
-    for (const auto& peak :
-         profile.peaks) {
-
+    for (const double frequency :
+         kZones) {
         maximumMagnitude =
             std::max(
                 maximumMagnitude,
                 std::abs(
-                    peak.gainDb));
+                    responseDb(
+                        profile,
+                        48000.0,
+                        frequency)));
     }
 
-    maximumMagnitude =
-        std::max(
-            maximumMagnitude,
-            std::abs(
-                profile.highShelfGainDb));
-
-    BF_REQUIRE(
-        maximumMagnitude <
-        0.15);
+    BF_REQUIRE(maximumMagnitude < 0.15);
 }
 
 void verifyAnalyzerHasNoUpperDbCeiling() {
@@ -452,25 +481,16 @@ void verifyAnalyzerHasNoUpperDbCeiling() {
     BF_REQUIRE(loud.valid);
 
     BF_REQUIRE(
-        std::abs(
-            loud.lowShelfGainDb -
-            baseline.lowShelfGainDb) <
-        1.0e-8);
-
-    BF_REQUIRE(
-        std::abs(
-            loud.highShelfGainDb -
-            baseline.highShelfGainDb) <
-        1.0e-8);
+        loud.firValid ==
+        baseline.firValid);
 
     for (std::size_t i = 0;
-         i < loud.peaks.size();
+         i < loud.firTaps.size();
          ++i) {
-
         BF_REQUIRE(
             std::abs(
-                loud.peaks[i].gainDb -
-                baseline.peaks[i].gainDb) <
+                loud.firTaps[i] -
+                baseline.firTaps[i]) <
             1.0e-8);
     }
 }
@@ -483,7 +503,7 @@ int main() {
     verifyAnalyzerHasNoUpperDbCeiling();
 
     std::cout
-        << "Bass Finisher adaptive full-band MATCH quality passed\n";
+        << "Bass Finisher minimum-phase FIR MATCH quality passed\n";
 
     return 0;
 }
