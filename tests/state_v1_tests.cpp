@@ -6,6 +6,7 @@
 #include "base/source/fstreamer.h"
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 using namespace HighGainGuitarFinisher;
 using namespace Steinberg;
@@ -16,6 +17,41 @@ void rewind(MemoryStream& s){
     BF_REQUIRE(s.seek(0,IBStream::kIBSeekSet,&pos)==kResultOk);
     BF_REQUIRE(pos==0);
 }
+}
+
+
+void verifyCoreValues(
+    Processor& p,
+    const double expected[6],
+    double expectedMatchAmount) {
+
+    MemoryStream saved;
+    BF_REQUIRE(p.getState(&saved)==kResultOk);
+    rewind(saved);
+
+    IBStreamer r(&saved,kLittleEndian);
+
+    int32 version=0;
+    BF_REQUIRE(r.readInt32(version));
+    BF_REQUIRE(version==kStateVersion);
+
+    for(int i=0;i<6;++i){
+        double value=0.0;
+        BF_REQUIRE(r.readDouble(value));
+        BF_REQUIRE(
+            std::abs(
+                value-
+                expected[i])<
+            1.0e-12);
+    }
+
+    ToneMatchStatePayload tm{};
+    BF_REQUIRE(readToneMatchState(r,tm));
+    BF_REQUIRE(
+        std::abs(
+            tm.amount-
+            expectedMatchAmount)<
+        1.0e-12);
 }
 
 int main(){
@@ -85,6 +121,46 @@ int main(){
     BF_REQUIRE(bw.writeInt32(99));
     rewind(bad);
     BF_REQUIRE(p.setState(&bad)==kResultFalse);
+
+    // State loading must be atomic. A malformed/truncated stream may fail,
+    // but it must not partially overwrite an already valid plugin state.
+    {
+        MemoryStream truncated;
+        IBStreamer tw(&truncated,kLittleEndian);
+        BF_REQUIRE(tw.writeInt32(kStateVersion));
+        BF_REQUIRE(tw.writeDouble(0.01));
+        BF_REQUIRE(tw.writeDouble(0.02));
+        rewind(truncated);
+
+        BF_REQUIRE(
+            p.setState(&truncated)==
+            kResultFalse);
+
+        verifyCoreValues(
+            p,
+            values,
+            tm.amount);
+    }
+
+    {
+        MemoryStream nonFinite;
+        IBStreamer nw(&nonFinite,kLittleEndian);
+        BF_REQUIRE(nw.writeInt32(kStateVersion));
+        BF_REQUIRE(nw.writeDouble(0.10));
+        BF_REQUIRE(
+            nw.writeDouble(
+                std::numeric_limits<double>::quiet_NaN()));
+        rewind(nonFinite);
+
+        BF_REQUIRE(
+            p.setState(&nonFinite)==
+            kResultFalse);
+
+        verifyCoreValues(
+            p,
+            values,
+            tm.amount);
+    }
 
     std::cout<<"Bass Finisher V1 state round-trip passed\n";
     return 0;
