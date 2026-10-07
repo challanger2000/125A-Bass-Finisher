@@ -197,14 +197,14 @@ void SteelPanelView::draw(
         inner,
         VSTGUI::kDrawStroked);
 
-    // Header and five workflow chassis sections. Coordinates intentionally
+    // Header and four workflow chassis sections. Coordinates intentionally
     // match the uidesc so every visual group has a fixed mathematical box.
     drawPlate(
         context,
         VSTGUI::CRect(
             24.0,
             22.0,
-            1296.0,
+            908.0,
             116.0));
 
     drawPlate(
@@ -236,18 +236,10 @@ void SteelPanelView::draw(
         VSTGUI::CRect(
             786.0,
             124.0,
-            1162.0,
+            904.0,
             544.0));
 
-    drawPlate(
-        context,
-        VSTGUI::CRect(
-            1174.0,
-            124.0,
-            1292.0,
-            544.0));
-
-    // Signal-flow rails: MATCH -> FINISH -> MIX FIT -> SPACE.
+    // Signal-flow rails: MATCH -> FINISH -> MIX FIT.
     context->setFillColor(kAccentSoft);
 
     context->drawRect(
@@ -274,14 +266,6 @@ void SteelPanelView::draw(
             187.0),
         VSTGUI::kDrawFilled);
 
-    context->drawRect(
-        VSTGUI::CRect(
-            802.0,
-            194.0,
-            1146.0,
-            197.0),
-        VSTGUI::kDrawFilled);
-
     // Stronger energy rail around the two main macro controls.
     context->setFillColor(kAccent);
 
@@ -305,7 +289,7 @@ void SteelPanelView::draw(
     context->setFillColor(kAccentSoft);
 
     for (const auto& rail :
-         std::array<VSTGUI::CRect, 4> {
+         std::array<VSTGUI::CRect, 3> {
             VSTGUI::CRect(
                 48.0, 532.0,
                 270.0, 535.0),
@@ -314,10 +298,7 @@ void SteelPanelView::draw(
                 514.0, 523.0),
             VSTGUI::CRect(
                 558.0, 486.0,
-                758.0, 489.0),
-            VSTGUI::CRect(
-                802.0, 486.0,
-                1146.0, 489.0)
+                758.0, 489.0)
          }) {
 
         context->drawRect(
@@ -325,48 +306,11 @@ void SteelPanelView::draw(
             VSTGUI::kDrawFilled);
     }
 
-    // SPACE depth lines keep the original industrial room language while
-    // spanning both the delay and room halves.
-    const std::array<double, 5>
-        spaceLines {
-            0.0,
-            18.0,
-            36.0,
-            54.0,
-            72.0
-        };
-
-    for (std::size_t i = 0;
-         i < spaceLines.size();
-         ++i) {
-
-        const double inset =
-            static_cast<double>(i) *
-            11.0;
-
-        context->setFrameColor(
-            i == 0
-                ? kAccentSoft
-                : kInnerFrame);
-
-        context->setLineWidth(1.0);
-
-        context->drawLine(
-            VSTGUI::CPoint(
-                812.0 + inset,
-                412.0 +
-                    spaceLines[i] * 0.40),
-            VSTGUI::CPoint(
-                1136.0 - inset,
-                412.0 +
-                    spaceLines[i] * 0.40));
-    }
-
     // Corner fasteners.
     drawScrew(context, 20.0, 20.0);
-    drawScrew(context, 1300.0, 20.0);
+    drawScrew(context, 912.0, 20.0);
     drawScrew(context, 20.0, 540.0);
-    drawScrew(context, 1300.0, 540.0);
+    drawScrew(context, 912.0, 540.0);
 
     setDirty(false);
 }
