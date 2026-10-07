@@ -58,7 +58,7 @@ public:
         Steinberg::Vst::IMessage* message) override;
 
 private:
-    static constexpr std::size_t kAutomatedParameterCount = 12;
+    static constexpr std::size_t kAutomatedParameterCount = 7;
 
     struct AutomationCursor {
         Steinberg::Vst::IParamValueQueue* queue {nullptr};
@@ -107,18 +107,12 @@ private:
 
     double sampleRate_ {44100.0};
     double finish_ {0.0};
-    double room_ {0.0};
-    double roomDecay_ {0.5};
     double output_ {0.5};
     double bypass_ {0.0};
     double lowCut_ {0.0};
     double mode_ {0.0};
     double mass_ {0.0};
-    double delayWet_ {0.0};
-    double delayFeedback_ {0.35};
-    double delayDivision_ {3.0 / 5.0};
     double toneMatchAmount_ {0.0};
-    double tempoBpm_ {120.0};
 
     dsp::ToneMatchProfile toneMatchProfile_ {};
     dsp::ToneMatchSpectrumSnapshot toneMatchReferenceSpectrum_ {};

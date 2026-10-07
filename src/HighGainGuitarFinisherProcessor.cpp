@@ -1,7 +1,6 @@
 #include "HighGainGuitarFinisherProcessor.h"
 #include "HighGainGuitarFinisherIDs.h"
 #include "dsp/LowCutMapping.h"
-#include "dsp/DelayDivisionMapping.h"
 #include "AutomationMath.h"
 #include "ToneMatchStateIO.h"
 #include "ToneMatchMessage.h"
@@ -9,7 +8,6 @@
 
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/vst/vstspeaker.h"
-#include "pluginterfaces/vst/ivstprocesscontext.h"
 
 #include <algorithm>
 #include <cmath>
@@ -155,16 +153,11 @@ ParamValue Processor::currentParameterValue(
 
     switch (id) {
         case kFinish:    return finish_;
-        case kRoom:      return room_;
-        case kRoomDecay: return roomDecay_;
         case kOutput:    return output_;
         case kBypass:    return bypass_;
         case kLowCut80:  return lowCut_;
         case kMode:          return mode_;
         case kMass:          return mass_;
-        case kDelayWet:      return delayWet_;
-        case kDelayFeedback: return delayFeedback_;
-        case kDelayDivision: return delayDivision_;
         case kToneMatchAmount: return toneMatchAmount_;
         default:         return 0.0;
     }
@@ -181,16 +174,11 @@ void Processor::applyParameterValue(
 
     switch (id) {
         case kFinish:    finish_ = value; break;
-        case kRoom:      room_ = value; break;
-        case kRoomDecay: roomDecay_ = value; break;
         case kOutput:    output_ = value; break;
         case kBypass:    bypass_ = value; break;
         case kLowCut80:  lowCut_ = value; break;
         case kMode:          mode_ = value; break;
         case kMass:          mass_ = value; break;
-        case kDelayWet:      delayWet_ = value; break;
-        case kDelayFeedback: delayFeedback_ = value; break;
-        case kDelayDivision: delayDivision_ = value; break;
         case kToneMatchAmount: toneMatchAmount_ = value; break;
         default: break;
     }
@@ -251,16 +239,11 @@ void Processor::initializeAutomationCursors(
 
         switch (id) {
             case kFinish:
-            case kRoom:
-            case kRoomDecay:
             case kOutput:
             case kBypass:
             case kLowCut80:
             case kMode:
             case kMass:
-            case kDelayWet:
-            case kDelayFeedback:
-            case kDelayDivision:
             case kToneMatchAmount:
                 break;
             default:
@@ -276,8 +259,7 @@ void Processor::initializeAutomationCursors(
         cursor.id = id;
         cursor.discrete =
             id == kBypass ||
-            id == kMode ||
-            id == kDelayDivision;
+            id == kMode;
         cursor.segmentStartOffset = -1;
         cursor.segmentStartValue =
             currentParameterValue(id);
@@ -670,13 +652,9 @@ uint64 Processor::processBlock(
         }
 
         if (!outputRight) {
-            // The DSP deliberately runs its spatial room as a stereo field.
-            // For Mono->Mono, collapse that complete field instead of
-            // discarding the right-side reflections.
-            left =
-                0.5 * (
-                    left +
-                    right);
+            // The core DSP is stereo-safe; collapse both processed channels
+            // for a true Mono->Mono bus instead of discarding one side.
+            left = 0.5 * (left + right);
         }
 
         if (!std::isfinite(left))
@@ -717,19 +695,6 @@ uint64 Processor::processBlock(
 }
 
 tresult PLUGIN_API Processor::process(ProcessData& data) {
-    if (data.processContext &&
-        (data.processContext->state &
-         ProcessContext::kTempoValid) != 0 &&
-        std::isfinite(data.processContext->tempo) &&
-        data.processContext->tempo > 0.0) {
-
-        tempoBpm_ =
-            std::clamp(
-                data.processContext->tempo,
-                20.0,
-                400.0);
-    }
-
     if (data.numInputs == 0 ||
         data.numOutputs == 0 ||
         data.numSamples <= 0) {

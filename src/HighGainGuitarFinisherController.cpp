@@ -4,7 +4,6 @@
 #include "SteelKnob.h"
 #include "SteelPanelView.h"
 #include "dsp/LowCutMapping.h"
-#include "dsp/DelayDivisionMapping.h"
 #include "ToneMatchStateIO.h"
 #include "ToneMatchMessage.h"
 #include "ToneMatchReferenceService.h"
@@ -494,16 +493,6 @@ Controller::createCustomView(
         tag = kLowCut80;
     } else if (std::strcmp(
                    name,
-                   "HGGFKnobWet") == 0) {
-
-        tag = kRoom;
-    } else if (std::strcmp(
-                   name,
-                   "HGGFKnobDecay") == 0) {
-
-        tag = kRoomDecay;
-    } else if (std::strcmp(
-                   name,
                    "HGGFKnobOutput") == 0) {
 
         tag = kOutput;
@@ -512,16 +501,6 @@ Controller::createCustomView(
                    "HGGFKnobMass") == 0) {
 
         tag = kMass;
-    } else if (std::strcmp(
-                   name,
-                   "HGGFKnobDelayWet") == 0) {
-
-        tag = kDelayWet;
-    } else if (std::strcmp(
-                   name,
-                   "HGGFKnobDelayFeedback") == 0) {
-
-        tag = kDelayFeedback;
     } else {
         return nullptr;
     }
@@ -539,19 +518,12 @@ Controller::createCustomView(
     // the actual normalized parameter defaults explicitly.
     switch (tag) {
         case kFinish:
-        case kRoom:
         case kLowCut80:
         case kMass:
-        case kDelayWet:
         case kToneMatchAmount:
             knob->setDefaultValue(0.0f);
             break;
 
-        case kDelayFeedback:
-            knob->setDefaultValue(0.35f);
-            break;
-
-        case kRoomDecay:
         case kOutput:
             knob->setDefaultValue(0.5f);
             break;
@@ -785,10 +757,6 @@ Controller::getParamStringByValue(
     switch (id) {
         case kFinish:
         case kMass:
-        case kRoom:
-        case kRoomDecay:
-        case kDelayWet:
-        case kDelayFeedback:
         case kToneMatchAmount:
             copyAscii(
                 percentText(
@@ -810,24 +778,6 @@ Controller::getParamStringByValue(
                     : "ACTIVE",
                 string);
             return kResultTrue;
-
-        case kDelayDivision: {
-            const int index =
-                dsp::delayDivisionIndexFromNormalized(
-                    valueNormalized);
-
-            static constexpr const char* labels[] {
-                "1/16",
-                "1/8T",
-                "1/8",
-                "1/8D",
-                "1/4",
-                "1/4D"
-            };
-
-            copyAscii(labels[index], string);
-            return kResultTrue;
-        }
 
         case kMode:
             copyAscii(
@@ -873,35 +823,6 @@ Controller::getParamValueByString(
             valueNormalized = 1.0;
             return kResultTrue;
         }
-    }
-
-    if (id == kDelayDivision) {
-        static constexpr const char* labels[] {
-            "1/16",
-            "1/8T",
-            "1/8",
-            "1/8D",
-            "1/4",
-            "1/4D"
-        };
-
-        for (int index = 0;
-             index < dsp::kDelayDivisionCount;
-             ++index) {
-
-            if (asciiEqualsIgnoreCase(
-                    string,
-                    labels[index])) {
-
-                valueNormalized =
-                    dsp::delayDivisionNormalizedFromIndex(
-                        index);
-
-                return kResultTrue;
-            }
-        }
-
-        return kResultFalse;
     }
 
     if (id == kMode) {
@@ -950,10 +871,6 @@ Controller::getParamValueByString(
 
     if (id == kFinish ||
         id == kMass ||
-        id == kRoom ||
-        id == kRoomDecay ||
-        id == kDelayWet ||
-        id == kDelayFeedback ||
         id == kToneMatchAmount) {
 
         UString value(
