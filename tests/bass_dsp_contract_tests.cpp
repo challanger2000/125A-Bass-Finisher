@@ -558,6 +558,235 @@ void verifyPathologicalInputsRecover() {
     }
 }
 
+
+double measuredHarmonic(
+    double sampleRate,
+    double fundamental,
+    double harmonic,
+    double inputAmplitude,
+    double finish,
+    double mass) {
+
+    MetalFinisherDSP dsp;
+    dsp.prepare(sampleRate);
+    dsp.setMode(0.5);
+    dsp.setFinish(finish);
+    dsp.setMass(mass);
+    dsp.setLowCut(0.0);
+    dsp.setToneMatchAmount(0.0);
+    dsp.reset();
+
+    const int total =
+        static_cast<int>(
+            sampleRate * 2.0);
+
+    const int start =
+        static_cast<int>(
+            sampleRate * 1.0);
+
+    long double sinAcc = 0.0L;
+    long double cosAcc = 0.0L;
+    int count = 0;
+
+    for (int i = 0; i < total; ++i) {
+        const double time =
+            static_cast<double>(i) /
+            sampleRate;
+
+        const double x =
+            inputAmplitude *
+            std::sin(
+                2.0 * kPi *
+                fundamental *
+                time);
+
+        double l = x;
+        double r = x;
+        dsp.processFrame(l, r);
+
+        if (i >= start) {
+            const double phase =
+                2.0 * kPi *
+                harmonic *
+                time;
+
+            sinAcc +=
+                static_cast<long double>(
+                    l * std::sin(phase));
+
+            cosAcc +=
+                static_cast<long double>(
+                    l * std::cos(phase));
+
+            ++count;
+        }
+    }
+
+    return
+        2.0 *
+        std::sqrt(
+            static_cast<double>(
+                sinAcc * sinAcc +
+                cosAcc * cosAcc)) /
+        static_cast<double>(count);
+}
+
+double measuredDc(
+    double sampleRate,
+    double fundamental,
+    double inputAmplitude,
+    double finish,
+    double mass) {
+
+    MetalFinisherDSP dsp;
+    dsp.prepare(sampleRate);
+    dsp.setMode(0.5);
+    dsp.setFinish(finish);
+    dsp.setMass(mass);
+    dsp.setLowCut(0.0);
+    dsp.setToneMatchAmount(0.0);
+    dsp.reset();
+
+    const int total =
+        static_cast<int>(
+            sampleRate * 2.0);
+
+    const int start =
+        static_cast<int>(
+            sampleRate * 1.0);
+
+    long double sum = 0.0L;
+    int count = 0;
+
+    for (int i = 0; i < total; ++i) {
+        const double time =
+            static_cast<double>(i) /
+            sampleRate;
+
+        const double x =
+            inputAmplitude *
+            std::sin(
+                2.0 * kPi *
+                fundamental *
+                time);
+
+        double l = x;
+        double r = x;
+        dsp.processFrame(l, r);
+
+        if (i >= start) {
+            sum += l;
+            ++count;
+        }
+    }
+
+    return std::abs(
+        static_cast<double>(
+            sum /
+            static_cast<long double>(
+                count)));
+}
+
+void verifyNonlinearStagesRemainControlled() {
+    // Both nonlinear stages must be genuinely level-dependent: a lower input
+    // level should create less third harmonic than the production test level.
+    const double finishH3Low =
+        measuredHarmonic(
+            48000.0,
+            300.0,
+            900.0,
+            0.08,
+            1.0,
+            0.0);
+
+    const double finishH3High =
+        measuredHarmonic(
+            48000.0,
+            300.0,
+            900.0,
+            0.22,
+            1.0,
+            0.0);
+
+    BF_REQUIRE(
+        finishH3High >
+        finishH3Low +
+        1.0e-6);
+
+    const double massH3Low =
+        measuredHarmonic(
+            48000.0,
+            80.0,
+            240.0,
+            0.15,
+            0.0,
+            1.0);
+
+    const double massH3High =
+        measuredHarmonic(
+            48000.0,
+            80.0,
+            240.0,
+            0.45,
+            0.0,
+            1.0);
+
+    BF_REQUIRE(
+        massH3High >
+        massH3Low +
+        1.0e-6);
+
+    // tanh is intentionally symmetric; the surrounding filters and level
+    // management must not introduce meaningful DC on a symmetric sine.
+    BF_REQUIRE(
+        measuredDc(
+            48000.0,
+            300.0,
+            0.22,
+            1.0,
+            0.0) <
+        1.0e-4);
+
+    BF_REQUIRE(
+        measuredDc(
+            48000.0,
+            80.0,
+            0.45,
+            0.0,
+            1.0) <
+        1.0e-4);
+
+    // Harmonic generation should remain in the same order of magnitude at
+    // common production sample rates. This is a regression guard, not an
+    // aliasing verdict; aliasing gets its own measured decision before release.
+    const double h3At44 =
+        measuredHarmonic(
+            44100.0,
+            300.0,
+            900.0,
+            0.22,
+            1.0,
+            0.0);
+
+    const double h3At96 =
+        measuredHarmonic(
+            96000.0,
+            300.0,
+            900.0,
+            0.22,
+            1.0,
+            0.0);
+
+    BF_REQUIRE(h3At44 > 0.0);
+    BF_REQUIRE(h3At96 > 0.0);
+
+    const double ratio =
+        h3At44 / h3At96;
+
+    BF_REQUIRE(ratio > 0.5);
+    BF_REQUIRE(ratio < 2.0);
+}
+
 int main() {
     verifyNeutralPathIsExact();
     verifyLowCutMappingAndResponse();
@@ -568,6 +797,7 @@ int main() {
     verifyFinishAddsControlledHarmonics();
     verifySampleRatesExtremesAndStereoLink();
     verifyPathologicalInputsRecover();
+    verifyNonlinearStagesRemainControlled();
     std::cout << "Bass Finisher DSP contract tests passed\n";
     return 0;
 }

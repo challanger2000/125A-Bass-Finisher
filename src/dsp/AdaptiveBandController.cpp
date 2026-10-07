@@ -248,7 +248,7 @@ void AdaptiveBandController::processFrame(
                     1.0)
                 : 0.0;
 
-        // A guitar can be boxy/body-heavy without one narrow resonance
+        // A bass can be boxy/body-heavy without one narrow resonance
         // dominating the four candidates. Treat sustained broad dominance
         // as a second, independent reason to reduce this zone.
         const double broadExcess =

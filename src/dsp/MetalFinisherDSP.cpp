@@ -38,7 +38,7 @@ constexpr double kFinishSaturationHighPassHz = 110.0;
 constexpr double kFinishSaturationLowPassHz = 3600.0;
 constexpr double kFinishSaturationDrive = 1.85;
 
-// At Low Cut Off the V2 MASS curve is preserved exactly. As the user moves
+// At LOW CONTROL Off the Bass V1 MASS curve is preserved exactly. As the user moves
 // the mix-placement high-pass upward, MASS shifts its positive weight above
 // the cut and reduces the amount of deep boost. These endpoints are
 // EMPIRICALLY TUNED and guarded by measured response tests.
@@ -705,13 +705,13 @@ void MetalFinisherDSP::processFrame(
         left,
         right);
 
-    // TONE MATCH receives the level-conditioned post-amp/cab signal.
+    // TONE MATCH receives the level-conditioned bass signal.
     toneMatch_.processFrame(
         left,
         right);
 
-    // FINISH deliberately sees the complete matched guitar signal. LOW CUT is
-    // a later mix-placement decision and must not remove palm-mute information
+    // FINISH deliberately sees the complete matched bass signal. LOW CONTROL is
+    // a later mix-placement decision and must not remove low-end/transient information
     // from the adaptive FINISH detectors.
     const double baseLeft = left;
     const double baseRight = right;
@@ -851,7 +851,7 @@ void MetalFinisherDSP::processFrame(
             (fullRight - baseRight) * finish_;
     }
 
-    // LOW CUT is a mix-placement stage after FINISH. It therefore cannot
+    // LOW CONTROL is a mix-placement stage after FINISH. It therefore cannot
     // change what FINISH detects, but it defines the lower boundary that MASS
     // must respect.
     const double filteredLeft =
@@ -960,7 +960,7 @@ void MetalFinisherDSP::processFrame(
         massCoefficientCountdown_ = 16;
     }
 
-    // MASS preserves the V2 curve when LOW CUT is Off. With LOW CUT active,
+    // MASS preserves the Bass V1 curve when LOW CONTROL is Off. With LOW CONTROL active,
     // its positive weight moves upward and weakens progressively so it cannot
     // simply restore the bass the user intentionally removed.
     const double massFullLeft =
