@@ -877,35 +877,122 @@ double snapshotLevelOffsetDb(
     const ToneMatchSpectrumSnapshot& reference,
     const ToneMatchSpectrumSnapshot& target) noexcept {
 
-    // Loudness is not timbre. Normalize the two analysed spectra to the same
-    // broad guitar-band energy before deriving any EQ correction. This keeps
-    // an otherwise identical reference recorded, for example, 6 dB louder
-    // from turning into a broadband +6 dB Tone Match profile.
-    constexpr double kMinimumFrequencyHz = 30.0;
+    // Tone matching must separate broadband level from spectral shape.
+    // Use an equal-log-frequency dB offset rather than total band energy:
+    // energy normalization overweights the bass and leaves a constant shape
+    // error when reference and target have different low-frequency balance.
+    constexpr std::size_t kPointCount = 96u;
+    constexpr double kMinimumFrequencyHz = 35.0;
     constexpr double kMaximumFrequencyHz = 10000.0;
+    constexpr double kActivityFloorDb = 48.0;
 
-    const double referencePower =
-        snapshotBandPower(
-            reference,
-            kMinimumFrequencyHz,
-            kMaximumFrequencyHz);
+    const double referencePeakDb =
+        snapshotPeakDb(reference);
 
-    const double targetPower =
-        snapshotBandPower(
-            target,
-            kMinimumFrequencyHz,
-            kMaximumFrequencyHz);
+    const double targetPeakDb =
+        snapshotPeakDb(target);
 
-    if (referencePower <= 1.0e-24 ||
-        targetPower <= 1.0e-24) {
+    std::array<double, kPointCount>
+        differences {};
+
+    std::size_t count = 0u;
+
+    const double logMinimum =
+        std::log(kMinimumFrequencyHz);
+
+    const double logMaximum =
+        std::log(kMaximumFrequencyHz);
+
+    for (std::size_t i = 0;
+         i < kPointCount;
+         ++i) {
+
+        const double position =
+            static_cast<double>(i) /
+            static_cast<double>(
+                kPointCount - 1u);
+
+        const double frequency =
+            std::exp(
+                logMinimum +
+                (logMaximum -
+                 logMinimum) *
+                    position);
+
+        const double referenceDb =
+            snapshotMagnitudeDb(
+                reference,
+                frequency);
+
+        const double targetDb =
+            snapshotMagnitudeDb(
+                target,
+                frequency);
+
+        const bool referenceActive =
+            referenceDb >=
+            referencePeakDb -
+                kActivityFloorDb;
+
+        const bool targetActive =
+            targetDb >=
+            targetPeakDb -
+                kActivityFloorDb;
+
+        if (!referenceActive &&
+            !targetActive) {
+            continue;
+        }
+
+        const double difference =
+            referenceDb -
+            targetDb;
+
+        if (std::isfinite(difference)) {
+            differences[count++] =
+                difference;
+        }
+    }
+
+    if (count == 0u)
         return 0.0;
+
+    // Trim the outer 10% so isolated resonances/noise do not define the
+    // broadband level offset. The remaining log-spaced points all carry equal
+    // weight.
+    std::sort(
+        differences.begin(),
+        differences.begin() +
+            static_cast<std::ptrdiff_t>(
+                count));
+
+    const std::size_t trim =
+        count >= 10u
+            ? count / 10u
+            : 0u;
+
+    const std::size_t begin =
+        trim;
+
+    const std::size_t finish =
+        count - trim;
+
+    if (begin >= finish)
+        return 0.0;
+
+    long double sum = 0.0L;
+
+    for (std::size_t i = begin;
+         i < finish;
+         ++i) {
+        sum += differences[i];
     }
 
     const double offsetDb =
-        10.0 *
-        std::log10(
-            referencePower /
-            targetPower);
+        static_cast<double>(
+            sum /
+            static_cast<long double>(
+                finish - begin));
 
     return std::isfinite(offsetDb)
         ? offsetDb
