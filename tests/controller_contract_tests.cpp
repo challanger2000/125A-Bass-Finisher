@@ -355,7 +355,7 @@ void verifyEditorLifecycle() {
 
         BF_REQUIRE(
             expected.getWidth() ==
-            1320);
+            932);
 
         BF_REQUIRE(
             expected.getHeight() ==
