@@ -4,6 +4,7 @@
 #include "SteelKnob.h"
 #include "SteelPanelView.h"
 #include "dsp/LowCutMapping.h"
+#include "dsp/DelayDivisionMapping.h"
 #include "ToneMatchStateIO.h"
 #include "ToneMatchMessage.h"
 #include "ToneMatchReferenceService.h"

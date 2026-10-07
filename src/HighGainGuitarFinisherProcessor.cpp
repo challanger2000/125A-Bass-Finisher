@@ -1,6 +1,7 @@
 #include "HighGainGuitarFinisherProcessor.h"
 #include "HighGainGuitarFinisherIDs.h"
 #include "dsp/LowCutMapping.h"
+#include "dsp/DelayDivisionMapping.h"
 #include "AutomationMath.h"
 #include "ToneMatchStateIO.h"
 #include "ToneMatchMessage.h"
