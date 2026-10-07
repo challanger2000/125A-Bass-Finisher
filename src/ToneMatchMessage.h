@@ -35,10 +35,12 @@ inline constexpr const char* kToneMatchReferenceSpectrumMessageKey =
     "reference-spectrum";
 
 struct ToneMatchSpectrumMessagePayload {
-    std::uint32_t version {2u};
+    std::uint32_t version {3u};
     double sampleRate {44100.0};
     std::uint64_t frameCount {0u};
     std::array<double, dsp::ToneMatchAnalyzer::kSpectrumBins> meanPower {};
+    std::int32_t hasLogCurve {0};
+    std::array<double, dsp::ToneMatchAnalyzer::kCurveBins> meanDb {};
 };
 
 inline ToneMatchSpectrumMessagePayload
@@ -49,6 +51,9 @@ makeToneMatchSpectrumMessage(
     payload.sampleRate = snapshot.sampleRate;
     payload.frameCount = snapshot.frameCount;
     payload.meanPower = snapshot.meanPower;
+    payload.hasLogCurve =
+        snapshot.hasLogCurve ? 1 : 0;
+    payload.meanDb = snapshot.meanDb;
     return payload;
 }
 
@@ -56,7 +61,7 @@ inline bool parseToneMatchSpectrumMessage(
     const ToneMatchSpectrumMessagePayload& payload,
     dsp::ToneMatchSpectrumSnapshot& snapshot) noexcept {
 
-    if (payload.version != 2u ||
+    if (payload.version != 3u ||
         !std::isfinite(payload.sampleRate) ||
         payload.sampleRate <= 1000.0 ||
         payload.frameCount == 0u) {
@@ -70,19 +75,34 @@ inline bool parseToneMatchSpectrumMessage(
         }
     }
 
+    if ((payload.hasLogCurve != 0 &&
+         payload.hasLogCurve != 1)) {
+        return false;
+    }
+
+    for (const double db : payload.meanDb) {
+        if (!std::isfinite(db))
+            return false;
+    }
+
     dsp::ToneMatchSpectrumSnapshot next {};
     next.sampleRate = payload.sampleRate;
     next.frameCount = payload.frameCount;
     next.meanPower = payload.meanPower;
+    next.hasLogCurve =
+        payload.hasLogCurve != 0;
+    next.meanDb = payload.meanDb;
     snapshot = next;
     return true;
 }
 
 struct ToneMatchReferenceSpectrumMessagePayload {
-    std::uint32_t version {1u};
+    std::uint32_t version {2u};
     std::int32_t valid {0};
     double sampleRate {44100.0};
     std::array<double, dsp::ToneMatchAnalyzer::kSpectrumBins> meanPower {};
+    std::int32_t hasLogCurve {0};
+    std::array<double, dsp::ToneMatchAnalyzer::kCurveBins> meanDb {};
 };
 
 inline ToneMatchReferenceSpectrumMessagePayload
@@ -101,6 +121,9 @@ makeToneMatchReferenceSpectrumMessage(
     if (valid) {
         payload.sampleRate = snapshot.sampleRate;
         payload.meanPower = snapshot.meanPower;
+        payload.hasLogCurve =
+            snapshot.hasLogCurve ? 1 : 0;
+        payload.meanDb = snapshot.meanDb;
     }
 
     return payload;
@@ -110,9 +133,11 @@ inline bool parseToneMatchReferenceSpectrumMessage(
     const ToneMatchReferenceSpectrumMessagePayload& payload,
     dsp::ToneMatchSpectrumSnapshot& snapshot) noexcept {
 
-    if (payload.version != 1u ||
+    if (payload.version != 2u ||
         (payload.valid != 0 &&
-         payload.valid != 1)) {
+         payload.valid != 1) ||
+        (payload.hasLogCurve != 0 &&
+         payload.hasLogCurve != 1)) {
         return false;
     }
 
@@ -134,10 +159,19 @@ inline bool parseToneMatchReferenceSpectrumMessage(
         }
     }
 
+    for (const double db :
+         payload.meanDb) {
+        if (!std::isfinite(db))
+            return false;
+    }
+
     dsp::ToneMatchSpectrumSnapshot next {};
     next.sampleRate = payload.sampleRate;
     next.frameCount = 4u;
     next.meanPower = payload.meanPower;
+    next.hasLogCurve =
+        payload.hasLogCurve != 0;
+    next.meanDb = payload.meanDb;
     snapshot = next;
     return true;
 }

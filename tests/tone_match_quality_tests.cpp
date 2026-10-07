@@ -518,12 +518,114 @@ void verifyAnalyzerHasNoUpperDbCeiling() {
     }
 }
 
+
+void verifyMeasuredAnalyzerSeparatesLevelFromTone() {
+    ToneMatchAnalyzer quiet;
+    ToneMatchAnalyzer loud;
+
+    quiet.prepare(48000.0);
+    loud.prepare(48000.0);
+
+    constexpr std::size_t sampleCount =
+        ToneMatchAnalyzer::kAnalysisFftSize * 6u;
+
+    std::array<double, 2048> q {};
+    std::array<double, 2048> l {};
+
+    std::size_t produced = 0u;
+
+    while (produced < sampleCount) {
+        const std::size_t count =
+            std::min<std::size_t>(
+                q.size(),
+                sampleCount - produced);
+
+        for (std::size_t i = 0;
+             i < count;
+             ++i) {
+
+            const double t =
+                static_cast<double>(
+                    produced + i) /
+                48000.0;
+
+            const double x =
+                0.45 * std::sin(
+                    2.0 * 3.14159265358979323846 *
+                    73.0 * t) +
+                0.25 * std::sin(
+                    2.0 * 3.14159265358979323846 *
+                    293.0 * t) +
+                0.15 * std::sin(
+                    2.0 * 3.14159265358979323846 *
+                    1171.0 * t);
+
+            q[i] = 0.1 * x;
+            l[i] = x;
+        }
+
+        quiet.pushStereo(
+            q.data(),
+            q.data(),
+            count);
+
+        loud.pushStereo(
+            l.data(),
+            l.data(),
+            count);
+
+        produced += count;
+    }
+
+    const auto quietSnapshot =
+        quiet.snapshot();
+
+    const auto loudSnapshot =
+        loud.snapshot();
+
+    BF_REQUIRE(quietSnapshot.hasLogCurve);
+    BF_REQUIRE(loudSnapshot.hasLogCurve);
+
+    const auto profile =
+        ToneMatchAnalyzer::makeProfile(
+            loudSnapshot,
+            quietSnapshot);
+
+    BF_REQUIRE(profile.valid);
+
+    double maximumMagnitude = 0.0;
+
+    for (const auto& peak :
+         profile.peaks) {
+        maximumMagnitude =
+            std::max(
+                maximumMagnitude,
+                std::abs(
+                    peak.gainDb));
+    }
+
+    maximumMagnitude =
+        std::max(
+            maximumMagnitude,
+            std::abs(
+                profile.lowShelfGainDb));
+
+    maximumMagnitude =
+        std::max(
+            maximumMagnitude,
+            std::abs(
+                profile.highShelfGainDb));
+
+    BF_REQUIRE(maximumMagnitude < 0.25);
+}
+
 int main() {
     verifyDistanceImproves();
     verifyNarrowSpikeIsRejected();
     verifySubBoostProtection();
     verifyAbsoluteLevelIsNotTone();
     verifyAnalyzerHasNoUpperDbCeiling();
+    verifyMeasuredAnalyzerSeparatesLevelFromTone();
 
     std::cout
         << "Bass Finisher adaptive full-band MATCH quality passed\n";

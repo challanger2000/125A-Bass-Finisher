@@ -180,12 +180,26 @@ inline bool writeToneMatchReferenceState(
         }
     }
 
+    if (!stream.writeInt32(
+            snapshot.hasLogCurve ? 1 : 0)) {
+        return false;
+    }
+
+    for (const double db :
+         snapshot.meanDb) {
+        if (!std::isfinite(db) ||
+            !stream.writeDouble(db)) {
+            return false;
+        }
+    }
+
     return true;
 }
 
 inline bool readToneMatchReferenceState(
     Steinberg::IBStreamer& stream,
-    dsp::ToneMatchSpectrumSnapshot& snapshot) noexcept {
+    dsp::ToneMatchSpectrumSnapshot& snapshot,
+    Steinberg::int32 stateVersion = 3) noexcept {
 
     Steinberg::int32 valid = 0;
 
@@ -216,6 +230,27 @@ inline bool readToneMatchReferenceState(
             !std::isfinite(power) ||
             power < 0.0) {
             return false;
+        }
+    }
+
+    if (stateVersion >= 3) {
+        Steinberg::int32 hasLogCurve = 0;
+
+        if (!stream.readInt32(hasLogCurve) ||
+            (hasLogCurve != 0 &&
+             hasLogCurve != 1)) {
+            return false;
+        }
+
+        next.hasLogCurve =
+            hasLogCurve != 0;
+
+        for (double& db :
+             next.meanDb) {
+            if (!stream.readDouble(db) ||
+                !std::isfinite(db)) {
+                return false;
+            }
         }
     }
 

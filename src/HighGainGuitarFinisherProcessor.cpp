@@ -789,7 +789,8 @@ tresult PLUGIN_API Processor::setState(IBStream* state) {
     dsp::ToneMatchSpectrumSnapshot nextReferenceSpectrum {};
     if (!readToneMatchReferenceState(
             stream,
-            nextReferenceSpectrum)) {
+            nextReferenceSpectrum,
+            version)) {
         return kResultFalse;
     }
 

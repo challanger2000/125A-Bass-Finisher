@@ -41,6 +41,7 @@ void ToneMatchAnalyzer::prepare(
 void ToneMatchAnalyzer::reset() noexcept {
     fifo_.fill(0.0);
     powerSum_.fill(0.0L);
+    meanDb_.fill(0.0);
     fifoFill_ = 0;
     frameCount_ = 0;
 }
@@ -70,18 +71,18 @@ void ToneMatchAnalyzer::pushStereo(
         fifo_[fifoFill_++] =
             0.5 * (l + r);
 
-        if (fifoFill_ == kFftSize) {
+        if (fifoFill_ == kAnalysisFftSize) {
             processFrame();
 
             for (std::size_t j = 0;
-                 j < kFftSize - kHopSize;
+                 j < kAnalysisFftSize - kHopSize;
                  ++j) {
                 fifo_[j] =
                     fifo_[j + kHopSize];
             }
 
             fifoFill_ =
-                kFftSize - kHopSize;
+                kAnalysisFftSize - kHopSize;
         }
     }
 }
@@ -89,16 +90,16 @@ void ToneMatchAnalyzer::pushStereo(
 void ToneMatchAnalyzer::fft(
     std::array<
         std::complex<double>,
-        kFftSize>& data) noexcept {
+        kAnalysisFftSize>& data) noexcept {
 
     std::size_t j = 0;
 
     for (std::size_t i = 1;
-         i < kFftSize;
+         i < kAnalysisFftSize;
          ++i) {
 
         std::size_t bit =
-            kFftSize >> 1;
+            kAnalysisFftSize >> 1;
 
         for (;
              j & bit;
@@ -115,7 +116,7 @@ void ToneMatchAnalyzer::fft(
     }
 
     for (std::size_t len = 2;
-         len <= kFftSize;
+         len <= kAnalysisFftSize;
          len <<= 1) {
 
         const double angle =
@@ -128,7 +129,7 @@ void ToneMatchAnalyzer::fft(
         };
 
         for (std::size_t i = 0;
-             i < kFftSize;
+             i < kAnalysisFftSize;
              i += len) {
 
             std::complex<double> w {1.0, 0.0};
@@ -158,19 +159,38 @@ void ToneMatchAnalyzer::fft(
 void ToneMatchAnalyzer::processFrame() noexcept {
     std::array<
         std::complex<double>,
-        kFftSize> spectrum {};
+        kAnalysisFftSize> spectrum {};
 
     long double mean = 0.0L;
+    long double squareSum = 0.0L;
 
-    for (const double sample : fifo_)
+    for (const double sample : fifo_) {
         mean += sample;
+        squareSum +=
+            static_cast<long double>(sample) *
+            static_cast<long double>(sample);
+    }
 
     mean /=
         static_cast<long double>(
-            kFftSize);
+            kAnalysisFftSize);
+
+    const double rms =
+        std::sqrt(
+            std::max(
+                static_cast<double>(
+                    squareSum /
+                    static_cast<long double>(
+                        kAnalysisFftSize)),
+                0.0));
+
+    // Ignore effectively silent windows. Normalizing a noise-only/silent
+    // frame would otherwise turn its floor into a tonal signature.
+    if (rms < 1.0e-7)
+        return;
 
     for (std::size_t i = 0;
-         i < kFftSize;
+         i < kAnalysisFftSize;
          ++i) {
 
         const double window =
@@ -180,7 +200,7 @@ void ToneMatchAnalyzer::processFrame() noexcept {
                     2.0 * kPi *
                     static_cast<double>(i) /
                     static_cast<double>(
-                        kFftSize - 1));
+                        kAnalysisFftSize - 1));
 
         const double sample =
             fifo_[i] -
@@ -195,17 +215,167 @@ void ToneMatchAnalyzer::processFrame() noexcept {
 
     fft(spectrum);
 
+    // Keep the old 4096-grid power spectrum for backwards-compatible state
+    // and fixtures. Because 16384 is exactly 4x 4096, these frequencies land
+    // on exact high-resolution FFT bins.
+    constexpr std::size_t kFftRatio =
+        kAnalysisFftSize / kFftSize;
+
     for (std::size_t bin = 0;
          bin < kSpectrumBins;
          ++bin) {
 
+        const std::size_t analysisBin =
+            std::min(
+                bin * kFftRatio,
+                kAnalysisFftSize / 2);
+
         const double magnitude =
             std::abs(
-                spectrum[bin]);
+                spectrum[analysisBin]);
 
         powerSum_[bin] +=
             static_cast<long double>(
                 magnitude * magnitude);
+    }
+
+    std::array<double, kCurveBins>
+        frameDb {};
+
+    const double logMinimum =
+        std::log(kCurveMinimumHz);
+
+    const double logMaximum =
+        std::log(
+            std::min(
+                kCurveMaximumHz,
+                sampleRate_ * 0.45));
+
+    double framePeakDb = kMinimumDb;
+
+    for (std::size_t i = 0;
+         i < kCurveBins;
+         ++i) {
+
+        const double position =
+            static_cast<double>(i) /
+            static_cast<double>(
+                kCurveBins - 1u);
+
+        const double frequency =
+            std::exp(
+                logMinimum +
+                (logMaximum -
+                 logMinimum) *
+                    position);
+
+        const double exactBin =
+            frequency *
+            static_cast<double>(
+                kAnalysisFftSize) /
+            sampleRate_;
+
+        const std::size_t index0 =
+            std::min(
+                static_cast<std::size_t>(
+                    std::floor(exactBin)),
+                kAnalysisFftSize / 2);
+
+        const std::size_t index1 =
+            std::min(
+                index0 + 1u,
+                kAnalysisFftSize / 2);
+
+        const double fraction =
+            exactBin -
+            static_cast<double>(index0);
+
+        const double m0 =
+            std::max(
+                std::abs(spectrum[index0]),
+                1.0e-12);
+
+        const double m1 =
+            std::max(
+                std::abs(spectrum[index1]),
+                1.0e-12);
+
+        const double db0 =
+            20.0 * std::log10(m0);
+
+        const double db1 =
+            20.0 * std::log10(m1);
+
+        const double db =
+            db0 +
+            (db1 - db0) *
+                fraction;
+
+        frameDb[i] = db;
+        framePeakDb =
+            std::max(
+                framePeakDb,
+                db);
+    }
+
+    // Separate level from tone on every frame before temporal averaging.
+    // This prevents loud attacks/notes from dominating the reference shape.
+    constexpr double kFrameActivityRangeDb = 60.0;
+
+    long double activeSum = 0.0L;
+    std::size_t activeCount = 0u;
+
+    for (const double db : frameDb) {
+        if (db >=
+            framePeakDb -
+                kFrameActivityRangeDb) {
+            activeSum += db;
+            ++activeCount;
+        }
+    }
+
+    if (activeCount == 0u)
+        return;
+
+    const double frameLevelDb =
+        static_cast<double>(
+            activeSum /
+            static_cast<long double>(
+                activeCount));
+
+    const std::size_t nextCount =
+        frameCount_ + 1u;
+
+    for (std::size_t i = 0;
+         i < kCurveBins;
+         ++i) {
+
+        // Do not let the very-low floor of a single frame dominate the mean.
+        const double normalized =
+            std::max(
+                frameDb[i],
+                framePeakDb -
+                    kFrameActivityRangeDb) -
+            frameLevelDb;
+
+        double sample =
+            normalized;
+
+        // Online robustification after a few observations. This is a
+        // winsorized mean: broad persistent tonal differences survive, while
+        // one-off note/resonance spikes cannot dominate a curve bin.
+        if (frameCount_ >= 4u) {
+            sample =
+                std::clamp(
+                    sample,
+                    meanDb_[i] - 12.0,
+                    meanDb_[i] + 12.0);
+        }
+
+        meanDb_[i] +=
+            (sample - meanDb_[i]) /
+            static_cast<double>(
+                nextCount);
     }
 
     ++frameCount_;
@@ -217,70 +387,50 @@ double ToneMatchAnalyzer::interpolatedMagnitudeDb(
     if (frameCount_ == 0)
         return kMinimumDb;
 
-    const double nyquist =
-        sampleRate_ * 0.5;
+    const double maximumFrequency =
+        std::min(
+            kCurveMaximumHz,
+            sampleRate_ * 0.45);
 
     const double frequency =
         std::clamp(
             clampFinite(
                 frequencyHz,
                 1000.0),
-            0.0,
-            nyquist);
+            kCurveMinimumHz,
+            maximumFrequency);
+
+    const double position =
+        (std::log(frequency) -
+         std::log(kCurveMinimumHz)) /
+        (std::log(maximumFrequency) -
+         std::log(kCurveMinimumHz));
 
     const double bin =
-        frequency *
+        position *
         static_cast<double>(
-            kFftSize) /
-        sampleRate_;
+            kCurveBins - 1u);
 
     const std::size_t index0 =
         std::min(
             static_cast<std::size_t>(
                 std::floor(bin)),
-            kSpectrumBins - 1);
+            kCurveBins - 1u);
 
     const std::size_t index1 =
         std::min(
-            index0 + 1,
-            kSpectrumBins - 1);
+            index0 + 1u,
+            kCurveBins - 1u);
 
     const double fraction =
         bin -
         static_cast<double>(
             index0);
 
-    const auto powerAt =
-        [&](std::size_t index) noexcept {
-
-            return
-                static_cast<double>(
-                    powerSum_[index] /
-                    static_cast<long double>(
-                        frameCount_));
-        };
-
-    const double p0 =
-        std::max(
-            powerAt(index0),
-            1.0e-24);
-
-    const double p1 =
-        std::max(
-            powerAt(index1),
-            1.0e-24);
-
-    const double db0 =
-        10.0 *
-        std::log10(p0);
-
-    const double db1 =
-        10.0 *
-        std::log10(p1);
-
     return
-        db0 +
-        (db1 - db0) *
+        meanDb_[index0] +
+        (meanDb_[index1] -
+         meanDb_[index0]) *
             fraction;
 }
 
@@ -288,32 +438,9 @@ double ToneMatchAnalyzer::peakMagnitudeDb() const noexcept {
     if (frameCount_ == 0)
         return kMinimumDb;
 
-    double maximum = kMinimumDb;
-
-    for (std::size_t bin = 1;
-         bin < kSpectrumBins;
-         ++bin) {
-
-        const double power =
-            static_cast<double>(
-                powerSum_[bin] /
-                static_cast<long double>(
-                    frameCount_));
-
-        if (power <= 0.0)
-            continue;
-
-        maximum =
-            std::max(
-                maximum,
-                10.0 *
-                    std::log10(
-                        std::max(
-                            power,
-                            1.0e-24)));
-    }
-
-    return maximum;
+    return *std::max_element(
+        meanDb_.begin(),
+        meanDb_.end());
 }
 
 ToneMatchSpectrumSnapshot
@@ -342,6 +469,9 @@ ToneMatchAnalyzer::snapshot() const noexcept {
                 divisor);
     }
 
+    result.hasLogCurve = true;
+    result.meanDb = meanDb_;
+
     return result;
 }
 
@@ -350,6 +480,56 @@ namespace {
 double snapshotMagnitudeDb(
     const ToneMatchSpectrumSnapshot& snapshot,
     double frequencyHz) noexcept {
+
+    if (snapshot.hasLogCurve) {
+        const double maximumFrequency =
+            std::min(
+                ToneMatchAnalyzer::kCurveMaximumHz,
+                snapshot.sampleRate * 0.45);
+
+        const double frequency =
+            std::clamp(
+                clampFinite(
+                    frequencyHz,
+                    1000.0),
+                ToneMatchAnalyzer::kCurveMinimumHz,
+                maximumFrequency);
+
+        const double position =
+            (std::log(frequency) -
+             std::log(
+                 ToneMatchAnalyzer::kCurveMinimumHz)) /
+            (std::log(maximumFrequency) -
+             std::log(
+                 ToneMatchAnalyzer::kCurveMinimumHz));
+
+        const double bin =
+            position *
+            static_cast<double>(
+                ToneMatchAnalyzer::kCurveBins - 1u);
+
+        const std::size_t index0 =
+            std::min(
+                static_cast<std::size_t>(
+                    std::floor(bin)),
+                ToneMatchAnalyzer::kCurveBins - 1u);
+
+        const std::size_t index1 =
+            std::min(
+                index0 + 1u,
+                ToneMatchAnalyzer::kCurveBins - 1u);
+
+        const double fraction =
+            bin -
+            static_cast<double>(index0);
+
+        return
+            snapshot.meanDb[index0] +
+            (snapshot.meanDb[index1] -
+             snapshot.meanDb[index0]) *
+                fraction;
+    }
+
 
     if (snapshot.frameCount < 1 ||
         !std::isfinite(snapshot.sampleRate) ||
@@ -412,6 +592,13 @@ double snapshotMagnitudeDb(
 
 double snapshotPeakDb(
     const ToneMatchSpectrumSnapshot& snapshot) noexcept {
+
+    if (snapshot.hasLogCurve) {
+        return *std::max_element(
+            snapshot.meanDb.begin(),
+            snapshot.meanDb.end());
+    }
+
 
     if (snapshot.frameCount < 1)
         return kMinimumDb;

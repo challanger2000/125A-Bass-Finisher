@@ -16,6 +16,9 @@ ToneMatchReferenceProfileCodec::encode(
     out << std::setprecision(17);
     out << "sampleRate=" << snapshot.sampleRate << "\n";
     out << "frameCount=" << snapshot.frameCount << "\n";
+    out << "hasLogCurve="
+        << (snapshot.hasLogCurve ? 1 : 0)
+        << "\n";
 
     for (std::size_t i = 0;
          i < snapshot.meanPower.size();
@@ -23,6 +26,15 @@ ToneMatchReferenceProfileCodec::encode(
 
         out << "p" << i << "="
             << snapshot.meanPower[i]
+            << "\n";
+    }
+
+    for (std::size_t i = 0;
+         i < snapshot.meanDb.size();
+         ++i) {
+
+        out << "d" << i << "="
+            << snapshot.meanDb[i]
             << "\n";
     }
 
@@ -44,10 +56,14 @@ bool ToneMatchReferenceProfileCodec::decode(
 
         dsp::ToneMatchSpectrumSnapshot next {};
         bool versionSeen = false;
+        int decodedVersion = 0;
         bool sampleRateSeen = false;
         bool frameCountSeen = false;
         std::array<bool,
             dsp::ToneMatchAnalyzer::kSpectrumBins> powerSeen {};
+        std::array<bool,
+            dsp::ToneMatchAnalyzer::kCurveBins> dbSeen {};
+        bool hasLogCurveSeen = false;
 
         while (std::getline(in, line)) {
             if (line.empty())
@@ -71,9 +87,11 @@ bool ToneMatchReferenceProfileCodec::decode(
                 const auto version =
                     std::stoi(valueText);
 
-                if (version != kFileVersion)
+                if (version < 1 ||
+                    version > kFileVersion)
                     return false;
 
+                decodedVersion = version;
                 versionSeen = true;
                 continue;
             }
@@ -105,6 +123,46 @@ bool ToneMatchReferenceProfileCodec::decode(
                         frames);
 
                 frameCountSeen = true;
+                continue;
+            }
+
+            if (key == "hasLogCurve") {
+                const int value =
+                    std::stoi(valueText);
+
+                if (value != 0 &&
+                    value != 1) {
+                    return false;
+                }
+
+                next.hasLogCurve =
+                    value != 0;
+                hasLogCurveSeen = true;
+                continue;
+            }
+
+            if (key.size() >= 2 &&
+                key[0] == 'd') {
+
+                const auto index =
+                    static_cast<std::size_t>(
+                        std::stoull(
+                            key.substr(1)));
+
+                if (index >=
+                    next.meanDb.size() ||
+                    dbSeen[index]) {
+                    return false;
+                }
+
+                const double db =
+                    std::stod(valueText);
+
+                if (!std::isfinite(db))
+                    return false;
+
+                next.meanDb[index] = db;
+                dbSeen[index] = true;
                 continue;
             }
 
@@ -147,6 +205,19 @@ bool ToneMatchReferenceProfileCodec::decode(
         for (const bool seen : powerSeen) {
             if (!seen)
                 return false;
+        }
+
+        if (decodedVersion >= 2) {
+            if (!hasLogCurveSeen)
+                return false;
+
+            for (const bool seen : dbSeen) {
+                if (!seen)
+                    return false;
+            }
+        } else {
+            next.hasLogCurve = false;
+            next.meanDb.fill(0.0);
         }
 
         snapshot = next;

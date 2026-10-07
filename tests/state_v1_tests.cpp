@@ -55,7 +55,7 @@ void verifyCoreValues(
 }
 
 int main(){
-    BF_REQUIRE(kStateVersion==2);
+    BF_REQUIRE(kStateVersion==3);
     BF_REQUIRE(kFirstSupportedStateVersion==1);
 
     MemoryStream state;
@@ -96,7 +96,7 @@ int main(){
     IBStreamer r(&saved,kLittleEndian);
     int32 version=0;
     BF_REQUIRE(r.readInt32(version));
-    BF_REQUIRE(version==2);
+    BF_REQUIRE(version==3);
 
     double restored[6]{};
     for(double& v:restored) BF_REQUIRE(r.readDouble(v));
@@ -108,7 +108,7 @@ int main(){
     BF_REQUIRE(tm2.profile.valid);
 
     dsp::ToneMatchSpectrumSnapshot ref2{};
-    BF_REQUIRE(readToneMatchReferenceState(r,ref2));
+    BF_REQUIRE(readToneMatchReferenceState(r,ref2,kStateVersion));
     // Reference-state IO persists the analyzed spectrum, not the original
     // analyzer frame counter. A restored valid snapshot is canonicalized to
     // the minimum-ready frame count.

@@ -933,7 +933,8 @@ Controller::setComponentState(
     dsp::ToneMatchSpectrumSnapshot nextReferenceSpectrum {};
     if (!readToneMatchReferenceState(
             stream,
-            nextReferenceSpectrum)) {
+            nextReferenceSpectrum,
+            version)) {
         return kResultFalse;
     }
 
