@@ -8,6 +8,7 @@
 #include "public.sdk/source/common/memorystream.h"
 #include "vstgui/lib/controls/ccontrol.h"
 #include "vstgui/lib/events.h"
+#include "vstgui/uidescription/uiattributes.h"
 
 #include <cmath>
 #include <iostream>
