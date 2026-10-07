@@ -92,6 +92,16 @@ private:
     std::array<Biquad, 2> massBoost_ {};
     std::array<Biquad, 2> massCleanup_ {};
 
+    // LOW CONTROL detector and dynamic sub-containment path.
+    std::array<Biquad, 2> lowControlSubDetector_ {};
+    std::array<Biquad, 2> lowControlBodyDetector_ {};
+    std::array<Biquad, 2> lowControlDynamicShelf_ {};
+
+    // MASS harmonic support is band-limited so it creates useful upper
+    // harmonics from the bass body instead of distorting the whole spectrum.
+    std::array<Biquad, 2> massHarmonicHighPass_ {};
+    std::array<Biquad, 2> massHarmonicLowPass_ {};
+
     AdaptiveBandController lowEnd_ {};
     AdaptiveBandController body_ {};
     AdaptiveBandController articulation_ {};
@@ -130,11 +140,19 @@ private:
     double lowCutMix_ {0.0};
     double lowCutMixSmoothing_ {0.0};
     double lowCutFrequencySmoothing_ {0.0};
+
+    double lowControlSubPower_ {0.0};
+    double lowControlBodyPower_ {0.0};
+    double lowControlEnvelopeSmoothing_ {0.0};
+    double lowControlDynamicGainDb_ {0.0};
+    int lowControlCoefficientCountdown_ {0};
+
     int lowCutCoefficientCountdown_ {0};
     int massCoefficientCountdown_ {0};
     int makeupShelfCoefficientCountdown_ {0};
 
     void updateLowCutCoefficients() noexcept;
+    void updateLowControlCoefficients() noexcept;
     void updateMassCoefficients() noexcept;
     void updateMakeupShelfCoefficients() noexcept;
     void updateModeTargets() noexcept;

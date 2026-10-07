@@ -235,12 +235,112 @@ void verifyAutoInputAndFinalContract() {
     }
 }
 
+
+double thirdHarmonicAmplitude(double massAmount) {
+    MetalFinisherDSP dsp;
+    dsp.prepare(kFs);
+    dsp.setFinish(0.0);
+    dsp.setLowCut(0.0);
+    dsp.setToneMatchAmount(0.0);
+    dsp.setMass(massAmount);
+    dsp.reset();
+
+    constexpr double fundamental = 80.0;
+    constexpr double harmonic = 240.0;
+    constexpr int total = static_cast<int>(kFs * 2.0);
+    constexpr int start = static_cast<int>(kFs * 1.0);
+
+    long double sinAcc = 0.0L;
+    long double cosAcc = 0.0L;
+    int count = 0;
+
+    for (int i = 0; i < total; ++i) {
+        const double time =
+            static_cast<double>(i) /
+            kFs;
+
+        const double x =
+            0.45 *
+            std::sin(
+                2.0 * kPi *
+                fundamental *
+                time);
+
+        double l = x;
+        double r = x;
+        dsp.processFrame(l, r);
+
+        if (i >= start) {
+            const double phase =
+                2.0 * kPi *
+                harmonic *
+                time;
+
+            sinAcc +=
+                static_cast<long double>(
+                    l *
+                    std::sin(phase));
+
+            cosAcc +=
+                static_cast<long double>(
+                    l *
+                    std::cos(phase));
+
+            ++count;
+        }
+    }
+
+    return
+        2.0 *
+        std::sqrt(
+            static_cast<double>(
+                sinAcc * sinAcc +
+                cosAcc * cosAcc)) /
+        static_cast<double>(count);
+}
+
+void verifyLowControlAndDynamicMass() {
+    const double cut90 =
+        lowCutNormalizedFromFrequency(
+            90.0);
+
+    // The static boundary still strongly removes true sub content.
+    const double subBefore =
+        steadyRms(
+            30.0,
+            0.0,
+            0.0);
+
+    const double subAfter =
+        steadyRms(
+            30.0,
+            cut90,
+            0.0);
+
+    BF_REQUIRE(
+        subAfter <
+        subBefore * 0.20);
+
+    // MASS is no longer only a static EQ: the band-limited nonlinear residual
+    // must create measurable third harmonic content from an 80 Hz sine.
+    const double h3Off =
+        thirdHarmonicAmplitude(0.0);
+
+    const double h3On =
+        thirdHarmonicAmplitude(1.0);
+
+    BF_REQUIRE(
+        h3On >
+        h3Off + 1.0e-4);
+}
+
 int main() {
     verifyNeutralPathIsExact();
     verifyLowCutMappingAndResponse();
     verifyBassMassContract();
     verifyFinishModesAreFiniteDistinctAndLevelBounded();
     verifyAutoInputAndFinalContract();
+    verifyLowControlAndDynamicMass();
     std::cout << "Bass Finisher DSP contract tests passed\n";
     return 0;
 }

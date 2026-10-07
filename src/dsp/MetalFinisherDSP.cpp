@@ -14,6 +14,23 @@ constexpr double kMassCleanupDb = -4.5;
 constexpr double kMassCleanupQ = 0.90;
 constexpr double kMassTrimDb = -0.30;
 
+// LOW CONTROL adds content-aware sub containment on top of the user-selected
+// high-pass boundary. It reacts only when sub energy dominates the useful
+// 60-140 Hz body region.
+constexpr double kLowControlSubDetectorHz = 48.0;
+constexpr double kLowControlBodyDetectorHz = 140.0;
+constexpr double kLowControlDynamicShelfHz = 58.0;
+constexpr double kLowControlRatioThreshold = 0.38;
+constexpr double kLowControlMaximumDynamicCutDb = -3.0;
+
+// MASS adds a band-limited odd-harmonic residual from roughly 35-180 Hz.
+// Because only the nonlinear residual is mixed back, MASS gains audibility
+// without simply stacking more sub energy.
+constexpr double kMassHarmonicHighPassHz = 35.0;
+constexpr double kMassHarmonicLowPassHz = 180.0;
+constexpr double kMassHarmonicDrive = 2.0;
+constexpr double kMassHarmonicMix = 0.35;
+
 // At Low Cut Off the V2 MASS curve is preserved exactly. As the user moves
 // the mix-placement high-pass upward, MASS shifts its positive weight above
 // the cut and reduces the amount of deep boost. These endpoints are
@@ -50,6 +67,9 @@ void MetalFinisherDSP::prepare(double sampleRate) {
 
     lowCutFrequencySmoothing_ =
         std::exp(-1.0 / (sampleRate_ * 0.020));
+
+    lowControlEnvelopeSmoothing_ =
+        std::exp(-1.0 / (sampleRate_ * 0.080));
 
     modeSmoothing_ =
         std::exp(-1.0 / (sampleRate_ * 0.030));
@@ -117,6 +137,51 @@ void MetalFinisherDSP::prepare(double sampleRate) {
     for (auto& filter : makeupHighShelf_)
         filter.setCoefficients(unityHighShelf);
 
+    const auto subDetector =
+        makeLowPass(
+            sampleRate_,
+            kLowControlSubDetectorHz,
+            0.7071067811865476);
+
+    const auto bodyDetector =
+        makeLowPass(
+            sampleRate_,
+            kLowControlBodyDetectorHz,
+            0.7071067811865476);
+
+    const auto unityDynamicShelf =
+        makeLowShelf(
+            sampleRate_,
+            kLowControlDynamicShelfHz,
+            0.0);
+
+    const auto harmonicHighPass =
+        makeHighPass(
+            sampleRate_,
+            kMassHarmonicHighPassHz,
+            0.7071067811865476);
+
+    const auto harmonicLowPass =
+        makeLowPass(
+            sampleRate_,
+            kMassHarmonicLowPassHz,
+            0.7071067811865476);
+
+    for (auto& filter : lowControlSubDetector_)
+        filter.setCoefficients(subDetector);
+
+    for (auto& filter : lowControlBodyDetector_)
+        filter.setCoefficients(bodyDetector);
+
+    for (auto& filter : lowControlDynamicShelf_)
+        filter.setCoefficients(unityDynamicShelf);
+
+    for (auto& filter : massHarmonicHighPass_)
+        filter.setCoefficients(harmonicHighPass);
+
+    for (auto& filter : massHarmonicLowPass_)
+        filter.setCoefficients(harmonicLowPass);
+
     updateMassCoefficients();
 
     autoLevel_.prepare(sampleRate_);
@@ -141,6 +206,26 @@ void MetalFinisherDSP::reset() noexcept {
 
     for (auto& filter : massCleanup_)
         filter.reset();
+
+    for (auto& filter : lowControlSubDetector_)
+        filter.reset();
+
+    for (auto& filter : lowControlBodyDetector_)
+        filter.reset();
+
+    for (auto& filter : lowControlDynamicShelf_)
+        filter.reset();
+
+    for (auto& filter : massHarmonicHighPass_)
+        filter.reset();
+
+    for (auto& filter : massHarmonicLowPass_)
+        filter.reset();
+
+    lowControlSubPower_ = 0.0;
+    lowControlBodyPower_ = 0.0;
+    lowControlDynamicGainDb_ = 0.0;
+    lowControlCoefficientCountdown_ = 0;
 
     massCoefficientCountdown_ = 0;
     makeupShelfCoefficientCountdown_ = 0;
@@ -250,6 +335,17 @@ void MetalFinisherDSP::updateLowCutCoefficients() noexcept {
             0.7071067811865476);
 
     for (auto& filter : lowCut_)
+        filter.setCoefficients(coefficients);
+}
+
+void MetalFinisherDSP::updateLowControlCoefficients() noexcept {
+    const auto coefficients =
+        makeLowShelf(
+            sampleRate_,
+            kLowControlDynamicShelfHz,
+            lowControlDynamicGainDb_);
+
+    for (auto& filter : lowControlDynamicShelf_)
         filter.setCoefficients(coefficients);
 }
 
@@ -702,6 +798,91 @@ void MetalFinisherDSP::processFrame(
             lowCutMix_;
     }
 
+    // LOW CONTROL: compare true sub energy with the broader low-body energy.
+    // Only an excessive sub/body ratio produces extra attenuation, so normal
+    // fundamentals are left alone.
+    {
+        const double subLeft =
+            lowControlSubDetector_[0].process(
+                processedLeft);
+
+        const double subRight =
+            lowControlSubDetector_[1].process(
+                processedRight);
+
+        const double bodyLeft =
+            lowControlBodyDetector_[0].process(
+                processedLeft);
+
+        const double bodyRight =
+            lowControlBodyDetector_[1].process(
+                processedRight);
+
+        const double subPower =
+            0.5 *
+            (subLeft * subLeft +
+             subRight * subRight);
+
+        const double bodyPower =
+            0.5 *
+            (bodyLeft * bodyLeft +
+             bodyRight * bodyRight);
+
+        lowControlSubPower_ =
+            lowControlEnvelopeSmoothing_ *
+                lowControlSubPower_ +
+            (1.0 - lowControlEnvelopeSmoothing_) *
+                subPower;
+
+        lowControlBodyPower_ =
+            lowControlEnvelopeSmoothing_ *
+                lowControlBodyPower_ +
+            (1.0 - lowControlEnvelopeSmoothing_) *
+                bodyPower;
+
+        const double ratio =
+            lowControlSubPower_ /
+            std::max(
+                lowControlBodyPower_,
+                1.0e-18);
+
+        const double excess =
+            std::clamp(
+                (ratio -
+                 kLowControlRatioThreshold) /
+                    (1.0 -
+                     kLowControlRatioThreshold),
+                0.0,
+                1.0);
+
+        const double controlAmount =
+            lowCutEnabled(lowCutTarget_)
+                ? lowCutTarget_
+                : 0.0;
+
+        const double targetGainDb =
+            kLowControlMaximumDynamicCutDb *
+            excess *
+            controlAmount;
+
+        lowControlDynamicGainDb_ =
+            0.95 * lowControlDynamicGainDb_ +
+            0.05 * targetGainDb;
+
+        if (--lowControlCoefficientCountdown_ <= 0) {
+            updateLowControlCoefficients();
+            lowControlCoefficientCountdown_ = 32;
+        }
+
+        processedLeft =
+            lowControlDynamicShelf_[0].process(
+                processedLeft);
+
+        processedRight =
+            lowControlDynamicShelf_[1].process(
+                processedRight);
+    }
+
     if (--massCoefficientCountdown_ <= 0) {
         updateMassCoefficients();
         massCoefficientCountdown_ = 16;
@@ -729,6 +910,48 @@ void MetalFinisherDSP::processFrame(
     processedRight +=
         (massFullRight - processedRight) *
         mass_;
+
+    if (mass_ > 0.0) {
+        const double harmonicInputLeft =
+            massHarmonicLowPass_[0].process(
+                massHarmonicHighPass_[0].process(
+                    processedLeft));
+
+        const double harmonicInputRight =
+            massHarmonicLowPass_[1].process(
+                massHarmonicHighPass_[1].process(
+                    processedRight));
+
+        const double saturatedLeft =
+            std::tanh(
+                kMassHarmonicDrive *
+                harmonicInputLeft) /
+            kMassHarmonicDrive;
+
+        const double saturatedRight =
+            std::tanh(
+                kMassHarmonicDrive *
+                harmonicInputRight) /
+            kMassHarmonicDrive;
+
+        const double residualLeft =
+            harmonicInputLeft -
+            saturatedLeft;
+
+        const double residualRight =
+            harmonicInputRight -
+            saturatedRight;
+
+        processedLeft +=
+            residualLeft *
+            kMassHarmonicMix *
+            mass_;
+
+        processedRight +=
+            residualRight *
+            kMassHarmonicMix *
+            mass_;
+    }
 
     // FINAL is always available as a transparent peak guard. Signals below
     // its knee are untouched; only near-full-scale peaks are managed.
