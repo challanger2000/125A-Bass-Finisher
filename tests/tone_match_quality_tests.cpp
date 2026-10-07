@@ -286,8 +286,8 @@ void verifyDistanceImproves() {
 
     // Improvement alone is not enough for a matcher. At 100% the protected
     // solver must land close to the synthetic reference curve.
-    BF_REQUIRE(after < 0.50);
-    BF_REQUIRE(after < before * 0.28);
+    BF_REQUIRE(after < 0.25);
+    BF_REQUIRE(after < before * 0.15);
 }
 
 void verifyNarrowSpikeIsRejected() {

@@ -35,7 +35,7 @@ inline constexpr const char* kToneMatchReferenceSpectrumMessageKey =
     "reference-spectrum";
 
 struct ToneMatchSpectrumMessagePayload {
-    std::uint32_t version {1u};
+    std::uint32_t version {2u};
     double sampleRate {44100.0};
     std::uint64_t frameCount {0u};
     std::array<double, dsp::ToneMatchAnalyzer::kSpectrumBins> meanPower {};
@@ -56,7 +56,7 @@ inline bool parseToneMatchSpectrumMessage(
     const ToneMatchSpectrumMessagePayload& payload,
     dsp::ToneMatchSpectrumSnapshot& snapshot) noexcept {
 
-    if (payload.version != 1u ||
+    if (payload.version != 2u ||
         !std::isfinite(payload.sampleRate) ||
         payload.sampleRate <= 1000.0 ||
         payload.frameCount == 0u) {

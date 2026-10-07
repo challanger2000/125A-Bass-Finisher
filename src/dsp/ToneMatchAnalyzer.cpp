@@ -1319,7 +1319,7 @@ ToneMatchAnalyzer::makeProfile(
     }
 
     constexpr std::size_t kCandidateCount =
-        96u;
+        256u;
 
     std::array<double, kCandidateCount>
         candidateFrequencies {};
@@ -1379,7 +1379,7 @@ ToneMatchAnalyzer::makeProfile(
 
         std::array<
             std::pair<double, std::size_t>,
-            24> strongest {};
+            64> strongest {};
 
         for (auto& item : strongest) {
             item.first = -1.0;

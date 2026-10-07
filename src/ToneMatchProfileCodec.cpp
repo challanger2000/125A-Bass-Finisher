@@ -113,6 +113,7 @@ bool ToneMatchProfileCodec::decode(
 
         dsp::ToneMatchProfile next {};
         bool sawVersion = false;
+        int decodedVersion = 0;
         bool sawValid = false;
         bool sawLowHz = false;
         bool sawLowDb = false;
@@ -141,9 +142,12 @@ bool ToneMatchProfileCodec::decode(
             }
 
             if (key == "version") {
-                if (static_cast<int>(
-                        std::llround(value)) !=
-                    kFileVersion) {
+                decodedVersion =
+                    static_cast<int>(
+                        std::llround(value));
+
+                if (decodedVersion < 1 ||
+                    decodedVersion > kFileVersion) {
                     return false;
                 }
 
@@ -239,8 +243,13 @@ bool ToneMatchProfileCodec::decode(
             return false;
         }
 
+        const std::size_t requiredPeakCount =
+            decodedVersion >= 2
+                ? next.peaks.size()
+                : 16u;
+
         for (std::size_t i = 0;
-             i < next.peaks.size();
+             i < requiredPeakCount;
              ++i) {
 
             if (!sawPeakHz[i] ||
@@ -248,6 +257,15 @@ bool ToneMatchProfileCodec::decode(
                 !sawPeakDb[i]) {
                 return false;
             }
+        }
+
+        for (std::size_t i = requiredPeakCount;
+             i < next.peaks.size();
+             ++i) {
+
+            next.peaks[i].frequencyHz = 1000.0;
+            next.peaks[i].q = 1.0;
+            next.peaks[i].gainDb = 0.0;
         }
 
         profile = next;

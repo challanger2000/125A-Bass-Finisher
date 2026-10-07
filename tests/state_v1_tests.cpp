@@ -46,7 +46,7 @@ void verifyCoreValues(
     }
 
     ToneMatchStatePayload tm{};
-    BF_REQUIRE(readToneMatchState(r,tm));
+    BF_REQUIRE(readToneMatchState(r,tm,kStateVersion));
     BF_REQUIRE(
         std::abs(
             tm.amount-
@@ -55,7 +55,7 @@ void verifyCoreValues(
 }
 
 int main(){
-    BF_REQUIRE(kStateVersion==1);
+    BF_REQUIRE(kStateVersion==2);
     BF_REQUIRE(kFirstSupportedStateVersion==1);
 
     MemoryStream state;
@@ -96,14 +96,14 @@ int main(){
     IBStreamer r(&saved,kLittleEndian);
     int32 version=0;
     BF_REQUIRE(r.readInt32(version));
-    BF_REQUIRE(version==1);
+    BF_REQUIRE(version==2);
 
     double restored[6]{};
     for(double& v:restored) BF_REQUIRE(r.readDouble(v));
     for(int i=0;i<6;++i) BF_REQUIRE(std::abs(restored[i]-values[i])<1.0e-12);
 
     ToneMatchStatePayload tm2{};
-    BF_REQUIRE(readToneMatchState(r,tm2));
+    BF_REQUIRE(readToneMatchState(r,tm2,kStateVersion));
     BF_REQUIRE(std::abs(tm2.amount-tm.amount)<1.0e-12);
     BF_REQUIRE(tm2.profile.valid);
 
@@ -115,6 +115,50 @@ int main(){
     BF_REQUIRE(ref2.frameCount>=4u);
     BF_REQUIRE(ref2.sampleRate==ref.sampleRate);
     BF_REQUIRE(ref2.meanPower==ref.meanPower);
+
+    // V1 legacy 16-band state remains readable after expanding the matcher
+    // to 64 adaptive bands.
+    {
+        MemoryStream oldState;
+        IBStreamer oldWriter(
+            &oldState,
+            kLittleEndian);
+
+        BF_REQUIRE(oldWriter.writeInt32(1));
+
+        for (double v : values)
+            BF_REQUIRE(
+                oldWriter.writeDouble(v));
+
+        BF_REQUIRE(oldWriter.writeDouble(0.31));
+        BF_REQUIRE(oldWriter.writeInt32(1));
+        BF_REQUIRE(oldWriter.writeDouble(80.0));
+        BF_REQUIRE(oldWriter.writeDouble(1.0));
+
+        for (std::size_t i = 0; i < 16u; ++i) {
+            BF_REQUIRE(oldWriter.writeDouble(
+                100.0 + 200.0 * static_cast<double>(i)));
+            BF_REQUIRE(oldWriter.writeDouble(1.0));
+            BF_REQUIRE(oldWriter.writeDouble(0.0));
+        }
+
+        BF_REQUIRE(oldWriter.writeDouble(6500.0));
+        BF_REQUIRE(oldWriter.writeDouble(0.0));
+
+        dsp::ToneMatchSpectrumSnapshot emptyReference {};
+        BF_REQUIRE(
+            writeToneMatchReferenceState(
+                oldWriter,
+                emptyReference));
+
+        rewind(oldState);
+
+        Processor oldProject;
+        BF_REQUIRE(
+            oldProject.setState(
+                &oldState) ==
+            kResultOk);
+    }
 
     MemoryStream bad;
     IBStreamer bw(&bad,kLittleEndian);

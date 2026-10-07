@@ -17,7 +17,8 @@ struct ToneMatchStatePayload {
 
 inline bool readToneMatchState(
     Steinberg::IBStreamer& stream,
-    ToneMatchStatePayload& payload) noexcept {
+    ToneMatchStatePayload& payload,
+    Steinberg::int32 stateVersion = 2) noexcept {
 
     ToneMatchStatePayload next {};
 
@@ -50,14 +51,33 @@ inline bool readToneMatchState(
         return false;
     }
 
-    for (auto& peak :
-         next.profile.peaks) {
+    const std::size_t peakCount =
+        stateVersion >= 2
+            ? next.profile.peaks.size()
+            : 16u;
+
+    for (std::size_t i = 0;
+         i < peakCount;
+         ++i) {
+
+        auto& peak =
+            next.profile.peaks[i];
 
         if (!readFinite(peak.frequencyHz) ||
             !readFinite(peak.q) ||
             !readFinite(peak.gainDb)) {
             return false;
         }
+    }
+
+    for (std::size_t i = peakCount;
+         i < next.profile.peaks.size();
+         ++i) {
+
+        next.profile.peaks[i].frequencyHz =
+            1000.0;
+        next.profile.peaks[i].q = 1.0;
+        next.profile.peaks[i].gainDb = 0.0;
     }
 
     if (!readFinite(
