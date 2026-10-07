@@ -417,10 +417,11 @@ void MetalFinisherDSP::applyAutoInput(
     double& left,
     double& right) noexcept {
 
+    // Only FINISH depends on a controlled operating level. MATCH, LOW CUT
+    // and MASS are linear tonal stages and must not acquire an unrelated
+    // level change merely because their amount is non-zero.
     const bool productionActive =
-        finish_ > 0.0 ||
-        mass_ > 0.0 ||
-        toneMatchAmount_ > 0.0;
+        finish_ > 0.0;
 
     if (!productionActive) {
         inputPower_ = 0.0;
