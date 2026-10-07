@@ -318,30 +318,18 @@ void ToneMatchAnalyzer::processFrame() noexcept {
                 db);
     }
 
-    // Separate level from tone on every frame before temporal averaging.
-    // This prevents loud attacks/notes from dominating the reference shape.
+    // Separate only broadband level from tone. A spectral-bin mean
+    // changes with the tonal content itself and can therefore bend the curve
+    // we are trying to measure. RMS is one frequency-independent scalar, so
+    // subtracting it preserves the full frame shape.
     constexpr double kFrameActivityRangeDb = 60.0;
 
-    long double activeSum = 0.0L;
-    std::size_t activeCount = 0u;
-
-    for (const double db : frameDb) {
-        if (db >=
-            framePeakDb -
-                kFrameActivityRangeDb) {
-            activeSum += db;
-            ++activeCount;
-        }
-    }
-
-    if (activeCount == 0u)
-        return;
-
     const double frameLevelDb =
-        static_cast<double>(
-            activeSum /
-            static_cast<long double>(
-                activeCount));
+        20.0 *
+        std::log10(
+            std::max(
+                rms,
+                1.0e-12));
 
     const std::size_t nextCount =
         frameCount_ + 1u;
@@ -350,7 +338,8 @@ void ToneMatchAnalyzer::processFrame() noexcept {
          i < kCurveBins;
          ++i) {
 
-        // Do not let the very-low floor of a single frame dominate the mean.
+        // Keep an adaptive floor relative to the frame peak so inactive FFT
+        // bins/noise do not dominate the temporal curve.
         const double normalized =
             std::max(
                 frameDb[i],
