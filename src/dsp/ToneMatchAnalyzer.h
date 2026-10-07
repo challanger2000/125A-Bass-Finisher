@@ -40,8 +40,8 @@ public:
     static constexpr std::size_t kAnalysisFftSize = 16384;
     static constexpr std::size_t kHopSize = kAnalysisFftSize / 2;
     static constexpr std::size_t kCurveBins = 512;
-    static constexpr std::size_t kTemporalCurveBins = 128;
-    static constexpr std::size_t kTemporalFrameSlots = 128;
+    static constexpr std::size_t kTemporalCurveBins = 96;
+    static constexpr std::size_t kTemporalFrameSlots = 64;
     static constexpr double kCurveMinimumHz = 30.0;
     static constexpr double kCurveMaximumHz = 12000.0;
 
