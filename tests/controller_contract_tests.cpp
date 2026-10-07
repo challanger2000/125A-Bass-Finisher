@@ -16,6 +16,10 @@ using namespace HighGainGuitarFinisher;
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 
+// VST3 SDK 3.8.1 moduleinit.cpp expects this process/module symbol.
+// A standalone EXE test has no plugin dllmain.cpp, so provide the test module handle here.
+void* moduleHandle = nullptr;
+
 namespace {
 
 void rewind(MemoryStream& stream) {
