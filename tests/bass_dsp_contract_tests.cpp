@@ -671,6 +671,7 @@ void verifyFinishModesAreFiniteDistinctAndLevelBounded() {
         << "\n";
 }
 
+} // namespace
 
 void verifyAutoInputAndFinalContract() {
     // INPUT AUTO must remain dormant on the exact neutral path.
