@@ -654,29 +654,75 @@ double profileFitError(
                 kFitPointCount));
 }
 
+double interpolateLimit(
+    double frequencyHz,
+    double f0,
+    double v0,
+    double f1,
+    double v1) noexcept {
+
+    if (frequencyHz <= f0)
+        return v0;
+
+    if (frequencyHz >= f1)
+        return v1;
+
+    const double t =
+        (frequencyHz - f0) /
+        (f1 - f0);
+
+    return
+        v0 +
+        (v1 - v0) * t;
+}
+
 double maximumBoostAt(double frequencyHz) noexcept {
-    if (frequencyHz < 50.0)
+    if (frequencyHz <= 50.0)
         return 1.5;
+
     if (frequencyHz < 65.0)
-        return 2.0;
+        return interpolateLimit(
+            frequencyHz,
+            50.0, 1.5,
+            65.0, 3.0);
+
     if (frequencyHz < 80.0)
-        return 3.0;
+        return interpolateLimit(
+            frequencyHz,
+            65.0, 3.0,
+            80.0, 4.0);
+
     if (frequencyHz < 120.0)
-        return 5.5;
+        return interpolateLimit(
+            frequencyHz,
+            80.0, 4.0,
+            120.0, 5.5);
+
     if (frequencyHz < 7000.0)
         return 8.0;
+
     return 6.0;
 }
 
 double maximumCutAt(double frequencyHz) noexcept {
-    if (frequencyHz < 50.0)
+    if (frequencyHz <= 50.0)
         return 4.0;
+
     if (frequencyHz < 65.0)
-        return 5.0;
+        return interpolateLimit(
+            frequencyHz,
+            50.0, 4.0,
+            65.0, 6.0);
+
     if (frequencyHz < 80.0)
-        return 6.0;
+        return interpolateLimit(
+            frequencyHz,
+            65.0, 6.0,
+            80.0, 7.0);
+
     if (frequencyHz < 7000.0)
         return 8.0;
+
     return 7.0;
 }
 
@@ -957,33 +1003,13 @@ double snapshotLevelOffsetDb(
     if (count == 0u)
         return 0.0;
 
-    // Trim the outer 10% so isolated resonances/noise do not define the
-    // broadband level offset. The remaining log-spaced points all carry equal
-    // weight.
-    std::sort(
-        differences.begin(),
-        differences.begin() +
-            static_cast<std::ptrdiff_t>(
-                count));
-
-    const std::size_t trim =
-        count >= 10u
-            ? count / 10u
-            : 0u;
-
-    const std::size_t begin =
-        trim;
-
-    const std::size_t finish =
-        count - trim;
-
-    if (begin >= finish)
-        return 0.0;
-
+    // Equal-log-frequency mean. Narrow spectral outliers are already
+    // handled later by desiredAt(), so the level normalization itself should
+    // not bias the tonal reference by trimming valid broad-band differences.
     long double sum = 0.0L;
 
-    for (std::size_t i = begin;
-         i < finish;
+    for (std::size_t i = 0;
+         i < count;
          ++i) {
         sum += differences[i];
     }
@@ -992,7 +1018,7 @@ double snapshotLevelOffsetDb(
         static_cast<double>(
             sum /
             static_cast<long double>(
-                finish - begin));
+                count));
 
     return std::isfinite(offsetDb)
         ? offsetDb
