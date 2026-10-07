@@ -193,43 +193,180 @@ void verifyComponentStateContract() {
 
 
 #ifdef _WIN32
+class TestPlugFrame final : public Steinberg::IPlugFrame {
+public:
+    explicit TestPlugFrame(HWND parent)
+    : parent_(parent) {
+    }
+
+    void setView(Steinberg::IPlugView* view) noexcept {
+        view_ = view;
+    }
+
+    Steinberg::tresult PLUGIN_API resizeView(
+        Steinberg::IPlugView* view,
+        Steinberg::ViewRect* newSize) override {
+
+        if (!view ||
+            !newSize ||
+            view != view_ ||
+            !parent_) {
+            return Steinberg::kInvalidArgument;
+        }
+
+        const int width =
+            newSize->right -
+            newSize->left;
+
+        const int height =
+            newSize->bottom -
+            newSize->top;
+
+        if (width <= 0 ||
+            height <= 0) {
+            return Steinberg::kInvalidArgument;
+        }
+
+        SetWindowPos(
+            parent_,
+            nullptr,
+            0,
+            0,
+            width,
+            height,
+            SWP_NOMOVE |
+                SWP_NOZORDER |
+                SWP_NOACTIVATE);
+
+        Steinberg::ViewRect current {};
+        if (view->getSize(&current) ==
+                Steinberg::kResultTrue &&
+            (current.right != newSize->right ||
+             current.bottom != newSize->bottom ||
+             current.left != newSize->left ||
+             current.top != newSize->top)) {
+
+            return view->onSize(
+                newSize);
+        }
+
+        return Steinberg::kResultTrue;
+    }
+
+    Steinberg::tresult PLUGIN_API queryInterface(
+        const Steinberg::TUID iid,
+        void** obj) override {
+
+        if (!obj)
+            return Steinberg::kInvalidArgument;
+
+        *obj = nullptr;
+
+        if (Steinberg::FUnknownPrivate::iidEqual(
+                iid,
+                Steinberg::IPlugFrame::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(
+                iid,
+                Steinberg::FUnknown::iid)) {
+
+            *obj =
+                static_cast<
+                    Steinberg::IPlugFrame*>(
+                        this);
+
+            addRef();
+            return Steinberg::kResultTrue;
+        }
+
+        return Steinberg::kNoInterface;
+    }
+
+    Steinberg::uint32 PLUGIN_API addRef() override {
+        return 1000;
+    }
+
+    Steinberg::uint32 PLUGIN_API release() override {
+        return 1000;
+    }
+
+private:
+    HWND parent_ {};
+    Steinberg::IPlugView* view_ {};
+};
+
 void verifyEditorLifecycle() {
     wchar_t originalDirectory[MAX_PATH] {};
     const DWORD originalLength =
-        GetCurrentDirectoryW(MAX_PATH, originalDirectory);
+        GetCurrentDirectoryW(
+            MAX_PATH,
+            originalDirectory);
 
     BF_REQUIRE(originalLength > 0);
     BF_REQUIRE(originalLength < MAX_PATH);
-    BF_REQUIRE(SetCurrentDirectoryW(L"..\\..\\resource") != FALSE);
+    BF_REQUIRE(
+        SetCurrentDirectoryW(
+            L"..\\..\\resource") != FALSE);
 
-    moduleHandle = GetModuleHandleW(nullptr);
+    moduleHandle =
+        GetModuleHandleW(nullptr);
+
     BF_REQUIRE(moduleHandle != nullptr);
     BF_REQUIRE(InitModule());
 
     Controller controller;
-    BF_REQUIRE(controller.initialize(nullptr) == kResultOk);
+    BF_REQUIRE(
+        controller.initialize(nullptr) ==
+        kResultOk);
 
-    HWND parent = CreateWindowExW(
-        0,
-        L"STATIC",
-        L"BassFinisherEditorLifecycleHost",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        1600,
-        900,
-        nullptr,
-        nullptr,
-        static_cast<HINSTANCE>(moduleHandle),
-        nullptr);
+    HWND parent =
+        CreateWindowExW(
+            0,
+            L"STATIC",
+            L"BassFinisherEditorLifecycleHost",
+            WS_OVERLAPPEDWINDOW,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            1600,
+            900,
+            nullptr,
+            nullptr,
+            static_cast<HINSTANCE>(
+                moduleHandle),
+            nullptr);
 
     BF_REQUIRE(parent != nullptr);
 
-    for (int pass = 0; pass < 2; ++pass) {
+    TestPlugFrame plugFrame(parent);
+
+    for (int pass = 0;
+         pass < 2;
+         ++pass) {
+
         auto* view =
-            controller.createView(ViewType::kEditor);
+            controller.createView(
+                ViewType::kEditor);
 
         BF_REQUIRE(view != nullptr);
+
+        ViewRect expected {};
+        BF_REQUIRE(
+            view->getSize(&expected) ==
+            kResultOk);
+
+        BF_REQUIRE(
+            expected.getWidth() ==
+            1320);
+
+        BF_REQUIRE(
+            expected.getHeight() ==
+            560);
+
+        plugFrame.setView(view);
+
+        BF_REQUIRE(
+            view->setFrame(
+                &plugFrame) ==
+            kResultOk);
 
         BF_REQUIRE(
             view->attached(
@@ -237,18 +374,38 @@ void verifyEditorLifecycle() {
                 kPlatformTypeHWND) ==
             kResultOk);
 
-        ViewRect size {};
-        BF_REQUIRE(view->getSize(&size) == kResultOk);
-        BF_REQUIRE(size.getWidth() == 1320);
-        BF_REQUIRE(size.getHeight() == 560);
+        ViewRect attachedSize {};
+        BF_REQUIRE(
+            view->getSize(
+                &attachedSize) ==
+            kResultOk);
 
-        BF_REQUIRE(view->removed() == kResultOk);
+        BF_REQUIRE(
+            attachedSize.getWidth() ==
+            expected.getWidth());
+
+        BF_REQUIRE(
+            attachedSize.getHeight() ==
+            expected.getHeight());
+
+        BF_REQUIRE(
+            view->setFrame(nullptr) ==
+            kResultOk);
+
+        BF_REQUIRE(
+            view->removed() ==
+            kResultOk);
+
+        plugFrame.setView(nullptr);
         view->release();
     }
 
     DestroyWindow(parent);
 
-    BF_REQUIRE(controller.terminate() == kResultOk);
+    BF_REQUIRE(
+        controller.terminate() ==
+        kResultOk);
+
     BF_REQUIRE(DeinitModule());
     moduleHandle = nullptr;
 
