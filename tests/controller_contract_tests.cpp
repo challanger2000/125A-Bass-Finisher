@@ -9,6 +9,10 @@
 
 #include <cmath>
 #include <iostream>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <string>
 
 using HighGainGuitarFinisher::Controller;
@@ -19,6 +23,9 @@ using namespace Steinberg::Vst;
 // VST3 SDK 3.8.1 moduleinit.cpp expects this process/module symbol.
 // A standalone EXE test has no plugin dllmain.cpp, so provide the test module handle here.
 void* moduleHandle = nullptr;
+
+extern bool InitModule ();
+extern bool DeinitModule ();
 
 namespace {
 
@@ -184,7 +191,77 @@ void verifyComponentStateContract() {
 
 }
 
+
+#ifdef _WIN32
+void verifyEditorLifecycle() {
+    wchar_t originalDirectory[MAX_PATH] {};
+    const DWORD originalLength =
+        GetCurrentDirectoryW(MAX_PATH, originalDirectory);
+
+    BF_REQUIRE(originalLength > 0);
+    BF_REQUIRE(originalLength < MAX_PATH);
+    BF_REQUIRE(SetCurrentDirectoryW(L"..\\..\\resource") != FALSE);
+
+    moduleHandle = GetModuleHandleW(nullptr);
+    BF_REQUIRE(moduleHandle != nullptr);
+    BF_REQUIRE(InitModule());
+
+    Controller controller;
+    BF_REQUIRE(controller.initialize(nullptr) == kResultOk);
+
+    HWND parent = CreateWindowExW(
+        0,
+        L"STATIC",
+        L"BassFinisherEditorLifecycleHost",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        1600,
+        900,
+        nullptr,
+        nullptr,
+        static_cast<HINSTANCE>(moduleHandle),
+        nullptr);
+
+    BF_REQUIRE(parent != nullptr);
+
+    for (int pass = 0; pass < 2; ++pass) {
+        auto* view =
+            controller.createView(ViewType::kEditor);
+
+        BF_REQUIRE(view != nullptr);
+
+        BF_REQUIRE(
+            view->attached(
+                parent,
+                kPlatformTypeHWND) ==
+            kResultOk);
+
+        ViewRect size {};
+        BF_REQUIRE(view->getSize(&size) == kResultOk);
+        BF_REQUIRE(size.getWidth() == 1320);
+        BF_REQUIRE(size.getHeight() == 560);
+
+        BF_REQUIRE(view->removed() == kResultOk);
+        view->release();
+    }
+
+    DestroyWindow(parent);
+
+    BF_REQUIRE(controller.terminate() == kResultOk);
+    BF_REQUIRE(DeinitModule());
+    moduleHandle = nullptr;
+
+    BF_REQUIRE(
+        SetCurrentDirectoryW(
+            originalDirectory) != FALSE);
+}
+#endif
+
 int main() {
+#ifdef _WIN32
+    verifyEditorLifecycle();
+#endif
     verifyParameterContract();
     verifyControllerZoomState();
     verifyComponentStateContract();
