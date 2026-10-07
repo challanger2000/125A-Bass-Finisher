@@ -339,10 +339,134 @@ void verifySubBoostProtection() {
 
 }
 
+
+void verifyAbsoluteLevelIsNotTone() {
+    auto target =
+        makeTarget(48000.0);
+
+    auto reference =
+        target;
+
+    // Same spectral shape, reference 48 dB louder. MATCH must not turn that
+    // absolute level difference into a broadband EQ curve.
+    const double powerScale =
+        std::pow(
+            10.0,
+            48.0 / 10.0);
+
+    for (double& power :
+         reference.meanPower) {
+        power *= powerScale;
+    }
+
+    const auto profile =
+        ToneMatchAnalyzer::makeProfile(
+            reference,
+            target);
+
+    BF_REQUIRE(profile.valid);
+
+    double maximumMagnitude = 0.0;
+
+    maximumMagnitude =
+        std::max(
+            maximumMagnitude,
+            std::abs(
+                profile.lowShelfGainDb));
+
+    for (const auto& peak :
+         profile.peaks) {
+
+        maximumMagnitude =
+            std::max(
+                maximumMagnitude,
+                std::abs(
+                    peak.gainDb));
+    }
+
+    maximumMagnitude =
+        std::max(
+            maximumMagnitude,
+            std::abs(
+                profile.highShelfGainDb));
+
+    BF_REQUIRE(
+        maximumMagnitude <
+        0.15);
+}
+
+void verifyAnalyzerHasNoUpperDbCeiling() {
+    const auto target =
+        makeTarget(48000.0);
+
+    const auto reference =
+        makeReference(48000.0);
+
+    const auto baseline =
+        ToneMatchAnalyzer::makeProfile(
+            reference,
+            target);
+
+    BF_REQUIRE(baseline.valid);
+
+    auto loudTarget =
+        target;
+
+    auto loudReference =
+        reference;
+
+    // Push both analysed spectra far above the historic +24 dB failure region.
+    // A common level shift must not alter the resulting tonal solution.
+    constexpr double hugePowerScale =
+        1.0e8;
+
+    for (double& power :
+         loudTarget.meanPower) {
+        power *= hugePowerScale;
+    }
+
+    for (double& power :
+         loudReference.meanPower) {
+        power *= hugePowerScale;
+    }
+
+    const auto loud =
+        ToneMatchAnalyzer::makeProfile(
+            loudReference,
+            loudTarget);
+
+    BF_REQUIRE(loud.valid);
+
+    BF_REQUIRE(
+        std::abs(
+            loud.lowShelfGainDb -
+            baseline.lowShelfGainDb) <
+        1.0e-8);
+
+    BF_REQUIRE(
+        std::abs(
+            loud.highShelfGainDb -
+            baseline.highShelfGainDb) <
+        1.0e-8);
+
+    for (std::size_t i = 0;
+         i < loud.peaks.size();
+         ++i) {
+
+        BF_REQUIRE(
+            std::abs(
+                loud.peaks[i].gainDb -
+                baseline.peaks[i].gainDb) <
+            1.0e-8);
+    }
+}
+
 int main() {
     verifyDistanceImproves();
     verifyNarrowSpikeIsRejected();
     verifySubBoostProtection();
+    verifyAbsoluteLevelIsNotTone();
+    verifyAnalyzerHasNoUpperDbCeiling();
 
     std::cout
         << "Bass Finisher protected 16-zone MATCH quality passed\n";

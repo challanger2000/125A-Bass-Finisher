@@ -837,13 +837,15 @@ double snapshotLevelOffsetDb(
         return 0.0;
     }
 
-    return std::clamp(
+    const double offsetDb =
         10.0 *
-            std::log10(
-                referencePower /
-                targetPower),
-        -24.0,
-        24.0);
+        std::log10(
+            referencePower /
+            targetPower);
+
+    return std::isfinite(offsetDb)
+        ? offsetDb
+        : 0.0;
 }
 
 
@@ -912,7 +914,7 @@ ToneMatchAnalyzer::makeProfile(
 
     constexpr double kActivityFloorDb = 48.0;
 
-    const auto differenceAt =
+    const auto rawDifferenceAt =
         [&](double frequency) noexcept {
 
             const double referenceDb =
@@ -940,20 +942,144 @@ ToneMatchAnalyzer::makeProfile(
                 return 0.0;
             }
 
-            return std::clamp(
+            const double difference =
                 (referenceDb - targetDb) -
-                    levelOffsetDb,
-                -kMaximumMatchDb,
-                kMaximumMatchDb);
+                levelOffsetDb;
+
+            return std::isfinite(difference)
+                ? difference
+                : 0.0;
+        };
+
+    std::array<double, kToneMatchPeakCount>
+        zoneDifference {};
+
+    for (std::size_t i = 0;
+         i < centers.size();
+         ++i) {
+
+        const double center =
+            centers[i];
+
+        // First reduce single-bin/narrow-feature influence by measuring a
+        // local log-frequency neighbourhood. No dB clamp occurs here.
+        zoneDifference[i] =
+            0.15 * rawDifferenceAt(center / 1.30) +
+            0.20 * rawDifferenceAt(center / 1.14) +
+            0.30 * rawDifferenceAt(center) +
+            0.20 * rawDifferenceAt(center * 1.14) +
+            0.15 * rawDifferenceAt(center * 1.30);
+    }
+
+    // Explicit broad-curve smoothing before any protection limits. Two
+    // [0.25, 0.50, 0.25] passes suppress narrow reference features while
+    // preserving the large-scale bass tonal shape.
+    for (int pass = 0; pass < 2; ++pass) {
+        const auto previous =
+            zoneDifference;
+
+        for (std::size_t i = 0;
+             i < zoneDifference.size();
+             ++i) {
+
+            const double left =
+                previous[
+                    i > 0
+                        ? i - 1
+                        : i];
+
+            const double right =
+                previous[
+                    i + 1 <
+                            previous.size()
+                        ? i + 1
+                        : i];
+
+            zoneDifference[i] =
+                0.25 * left +
+                0.50 * previous[i] +
+                0.25 * right;
+        }
+    }
+
+    std::array<double, kToneMatchPeakCount>
+        protectedDesired {};
+
+    for (std::size_t i = 0;
+         i < protectedDesired.size();
+         ++i) {
+
+        protectedDesired[i] =
+            std::clamp(
+                zoneDifference[i] *
+                    zoneWeight[i],
+                -maximumCutDb[i],
+                maximumBoostDb[i]);
+    }
+
+    const auto desiredAt =
+        [&](double frequency) noexcept {
+
+            const double safeFrequency =
+                std::max(
+                    frequency,
+                    centers.front());
+
+            if (safeFrequency <=
+                centers.front()) {
+                return
+                    protectedDesired.front();
+            }
+
+            if (safeFrequency >=
+                centers.back()) {
+                return
+                    protectedDesired.back();
+            }
+
+            for (std::size_t i = 0;
+                 i + 1 < centers.size();
+                 ++i) {
+
+                if (safeFrequency >
+                    centers[i + 1]) {
+                    continue;
+                }
+
+                const double logA =
+                    std::log(
+                        centers[i]);
+
+                const double logB =
+                    std::log(
+                        centers[i + 1]);
+
+                const double t =
+                    std::clamp(
+                        (std::log(
+                             safeFrequency) -
+                         logA) /
+                            (logB - logA),
+                        0.0,
+                        1.0);
+
+                return
+                    protectedDesired[i] +
+                    (protectedDesired[i + 1] -
+                     protectedDesired[i]) *
+                        t;
+            }
+
+            return
+                protectedDesired.back();
         };
 
     profile.valid = true;
     profile.lowShelfFrequencyHz = 55.0;
     profile.lowShelfGainDb =
         std::clamp(
-            0.25 * differenceAt(32.0) +
-            0.50 * differenceAt(45.0) +
-            0.25 * differenceAt(65.0),
+            0.65 * protectedDesired[0] +
+            0.35 * protectedDesired[1],
             -3.0,
             1.5);
 
@@ -964,41 +1090,31 @@ ToneMatchAnalyzer::makeProfile(
         auto& peak =
             profile.peaks[i];
 
-        peak.frequencyHz = centers[i];
+        peak.frequencyHz =
+            centers[i];
 
-        peak.q = qValues[i];
-
-        const double center = centers[i];
-
-        const double broadDifference =
-            0.15 * differenceAt(center / 1.30) +
-            0.20 * differenceAt(center / 1.14) +
-            0.30 * differenceAt(center) +
-            0.20 * differenceAt(center * 1.14) +
-            0.15 * differenceAt(center * 1.30);
-
-        const double weighted =
-            broadDifference * zoneWeight[i];
+        peak.q =
+            qValues[i];
 
         peak.gainDb =
-            std::clamp(
-                weighted,
-                -maximumCutDb[i],
-                maximumBoostDb[i]);
+            protectedDesired[i];
     }
 
     profile.highShelfFrequencyHz = 3200.0;
     profile.highShelfGainDb =
         std::clamp(
-            0.5 * differenceAt(2800.0) +
-            0.5 * differenceAt(3800.0),
+            0.35 * protectedDesired[
+                protectedDesired.size() - 2] +
+            0.65 * protectedDesired.back(),
             -2.5,
             1.5);
 
+    // Solve against the protected smoothed target curve using the actual
+    // combined response of every overlapping shelf and peaking filter.
     refineProfileGains(
         profile,
         target.sampleRate,
-        differenceAt);
+        desiredAt);
 
     profile.lowShelfGainDb =
         std::clamp(profile.lowShelfGainDb, -3.0, 1.5);
