@@ -8,6 +8,7 @@
 #include "public.sdk/source/common/memorystream.h"
 #include "public.sdk/source/vst/hosting/parameterchanges.h"
 #include "pluginterfaces/vst/vstspeaker.h"
+#include "pluginterfaces/vst/ivstevents.h"
 
 #include <array>
 #include <cmath>
@@ -51,6 +52,62 @@ std::array<double, 6> readCoreState(Processor& p) {
         BF_REQUIRE(r.readDouble(v));
     return values;
 }
+
+
+class EmptyEventList final :
+    public Steinberg::Vst::IEventList {
+public:
+    Steinberg::int32 PLUGIN_API getEventCount() override {
+        return 0;
+    }
+
+    Steinberg::tresult PLUGIN_API getEvent(
+        Steinberg::int32,
+        Steinberg::Vst::Event&) override {
+        return Steinberg::kResultFalse;
+    }
+
+    Steinberg::tresult PLUGIN_API addEvent(
+        Steinberg::Vst::Event&) override {
+        return Steinberg::kResultFalse;
+    }
+
+    Steinberg::tresult PLUGIN_API queryInterface(
+        const Steinberg::TUID iid,
+        void** obj) override {
+
+        if (!obj)
+            return Steinberg::kInvalidArgument;
+
+        *obj = nullptr;
+
+        if (Steinberg::FUnknownPrivate::iidEqual(
+                iid,
+                Steinberg::Vst::IEventList::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(
+                iid,
+                Steinberg::FUnknown::iid)) {
+
+            *obj =
+                static_cast<
+                    Steinberg::Vst::IEventList*>(
+                        this);
+
+            addRef();
+            return Steinberg::kResultTrue;
+        }
+
+        return Steinberg::kNoInterface;
+    }
+
+    Steinberg::uint32 PLUGIN_API addRef() override {
+        return 1000;
+    }
+
+    Steinberg::uint32 PLUGIN_API release() override {
+        return 1000;
+    }
+};
 
 void verifyParameterFlush() {
     Processor p;
@@ -579,6 +636,282 @@ void verifyActivePathBlockAndModeInvariance() {
     }
 }
 
+
+void verifyIoEventAndTortureContracts() {
+    Processor p;
+    BF_REQUIRE(p.initialize(nullptr) == kResultOk);
+
+    BF_REQUIRE(
+        p.getBusCount(
+            kAudio,
+            Steinberg::Vst::kInput) ==
+        1);
+
+    BF_REQUIRE(
+        p.getBusCount(
+            kAudio,
+            Steinberg::Vst::kOutput) ==
+        1);
+
+    BF_REQUIRE(
+        p.getBusCount(
+            kEvent,
+            Steinberg::Vst::kInput) ==
+        0);
+
+    BF_REQUIRE(
+        p.getBusCount(
+            kEvent,
+            Steinberg::Vst::kOutput) ==
+        0);
+
+    SpeakerArrangement stereo[1] {
+        SpeakerArr::kStereo
+    };
+
+    BF_REQUIRE(
+        p.setBusArrangements(
+            stereo,
+            1,
+            stereo,
+            1) ==
+        kResultOk);
+
+    ProcessSetup setup {};
+    setup.processMode = kRealtime;
+    setup.symbolicSampleSize = kSample64;
+    setup.maxSamplesPerBlock = 1024;
+    setup.sampleRate = kFs;
+
+    BF_REQUIRE(
+        p.setupProcessing(setup) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        p.setActive(true) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        p.setProcessing(true) ==
+        kResultOk);
+
+    EmptyEventList inputEvents;
+    EmptyEventList outputEvents;
+
+    constexpr int32 maxSamples = 1024;
+
+    std::array<double, maxSamples> inL {};
+    std::array<double, maxSamples> inR {};
+    std::array<double, maxSamples> outL {};
+    std::array<double, maxSamples> outR {};
+
+    double* inPtrs[2] {
+        inL.data(),
+        inR.data()
+    };
+
+    double* outPtrs[2] {
+        outL.data(),
+        outR.data()
+    };
+
+    AudioBusBuffers inBus {};
+    inBus.numChannels = 2;
+    inBus.channelBuffers64 = inPtrs;
+
+    AudioBusBuffers outBus {};
+    outBus.numChannels = 2;
+    outBus.channelBuffers64 = outPtrs;
+
+    const int32 blockSizes[] {
+        1,
+        3,
+        17,
+        64,
+        255,
+        1024
+    };
+
+    for (int cycle = 0;
+         cycle < 24;
+         ++cycle) {
+
+        const int32 block =
+            blockSizes[
+                cycle %
+                static_cast<int>(
+                    std::size(
+                        blockSizes))];
+
+        const double tiny =
+            std::numeric_limits<
+                double>::denorm_min() *
+            512.0;
+
+        for (int32 i = 0;
+             i < block;
+             ++i) {
+
+            const double t =
+                static_cast<double>(
+                    cycle * maxSamples + i) /
+                kFs;
+
+            const bool subnormalCycle =
+                (cycle % 5) == 0;
+
+            inL[static_cast<std::size_t>(i)] =
+                subnormalCycle
+                    ? tiny
+                    : 0.19 *
+                        std::sin(
+                            2.0 *
+                            3.14159265358979323846 *
+                            73.0 *
+                            t +
+                            0.21);
+
+            inR[static_cast<std::size_t>(i)] =
+                subnormalCycle
+                    ? -tiny
+                    : 0.17 *
+                        std::sin(
+                            2.0 *
+                            3.14159265358979323846 *
+                            109.0 *
+                            t +
+                            0.47);
+
+            outL[static_cast<std::size_t>(i)] = 99.0;
+            outR[static_cast<std::size_t>(i)] = 99.0;
+        }
+
+        ParameterChanges changes(2);
+
+        addChange(
+            changes,
+            HighGainGuitarFinisher::kFinish,
+            (cycle % 3) == 0
+                ? 0.0
+                : 0.71);
+
+        addChange(
+            changes,
+            HighGainGuitarFinisher::kMass,
+            (cycle % 4) == 0
+                ? 0.0
+                : 0.63);
+
+        ProcessData data {};
+        data.processMode =
+            (cycle % 2) == 0
+                ? kRealtime
+                : kOffline;
+
+        data.symbolicSampleSize = kSample64;
+        data.numSamples = block;
+        data.numInputs = 1;
+        data.numOutputs = 1;
+        data.inputs = &inBus;
+        data.outputs = &outBus;
+        data.inputParameterChanges = &changes;
+        data.inputEvents = &inputEvents;
+        data.outputEvents = &outputEvents;
+
+        BF_REQUIRE(
+            p.process(data) ==
+            kResultOk);
+
+        BF_REQUIRE(
+            inputEvents.getEventCount() ==
+            0);
+
+        BF_REQUIRE(
+            outputEvents.getEventCount() ==
+            0);
+
+        for (int32 i = 0;
+             i < block;
+             ++i) {
+
+            BF_REQUIRE(
+                std::isfinite(
+                    outL[
+                        static_cast<
+                            std::size_t>(i)]));
+
+            BF_REQUIRE(
+                std::isfinite(
+                    outR[
+                        static_cast<
+                            std::size_t>(i)]));
+        }
+
+        if ((cycle % 6) == 5) {
+            BF_REQUIRE(
+                p.setProcessing(false) ==
+                kResultOk);
+
+            BF_REQUIRE(
+                p.setActive(false) ==
+                kResultOk);
+
+            BF_REQUIRE(
+                p.setActive(true) ==
+                kResultOk);
+
+            BF_REQUIRE(
+                p.setProcessing(true) ==
+                kResultOk);
+        }
+    }
+
+    ParameterChanges flushChanges(1);
+
+    addChange(
+        flushChanges,
+        HighGainGuitarFinisher::kOutput,
+        0.58);
+
+    ProcessData noAudio {};
+    noAudio.processMode = kRealtime;
+    noAudio.symbolicSampleSize = kSample64;
+    noAudio.numSamples = 0;
+    noAudio.numInputs = 0;
+    noAudio.numOutputs = 0;
+    noAudio.inputParameterChanges =
+        &flushChanges;
+    noAudio.inputEvents =
+        &inputEvents;
+    noAudio.outputEvents =
+        &outputEvents;
+
+    BF_REQUIRE(
+        p.process(noAudio) ==
+        kResultOk);
+
+    const auto state =
+        readCoreState(p);
+
+    BF_REQUIRE(
+        std::abs(
+            state[1] -
+            0.58) <
+        1.0e-12);
+
+    BF_REQUIRE(
+        p.setProcessing(false) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        p.setActive(false) ==
+        kResultOk);
+
+    BF_REQUIRE(
+        p.terminate() ==
+        kResultOk);
+}
+
 void verifyProcessingMatrix() {
     const int32 blockSizes[] {
         1,
@@ -627,6 +960,7 @@ int main() {
     verifyLifecycleAndBusContracts();
     verifySampleAccurateOutputAutomation();
     verifyActivePathBlockAndModeInvariance();
+    verifyIoEventAndTortureContracts();
     verifyProcessingMatrix();
     std::cout << "Bass Finisher processor contracts passed\n";
     return 0;
