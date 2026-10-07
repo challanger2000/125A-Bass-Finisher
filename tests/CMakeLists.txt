@@ -127,3 +127,33 @@ target_include_directories(BassFinisherToneMatchQualityTests PRIVATE
 target_compile_features(BassFinisherToneMatchQualityTests PRIVATE cxx_std_17)
 hggf_enable_project_warnings(BassFinisherToneMatchQualityTests)
 add_test(NAME BassFinisherToneMatchQualityTests COMMAND BassFinisherToneMatchQualityTests)
+
+
+add_executable(BassFinisherControllerContractTests
+    controller_contract_tests.cpp
+    ../src/HighGainGuitarFinisherController.cpp
+    ../src/ToneMatchProfileCodec.cpp
+    ../src/AudioFileDecoder.cpp
+    ../src/ToneMatchReferenceProfileCodec.cpp
+    ../src/ToneMatchReferenceService.cpp
+    ../src/SteelKnob.cpp
+    ../src/SteelPanelView.cpp
+    ../src/BrandLogoView.cpp
+    ../src/dsp/ToneMatchAnalyzer.cpp
+    ../src/dsp/ToneMatchDSP.cpp
+    ${vst3sdk_SOURCE_DIR}/public.sdk/source/common/memorystream.cpp
+)
+target_include_directories(BassFinisherControllerContractTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../src/dsp
+)
+target_link_libraries(BassFinisherControllerContractTests PRIVATE
+    sdk
+    vstgui_support
+    bassfinisher_dr_libs
+    Threads::Threads
+)
+target_compile_features(BassFinisherControllerContractTests PRIVATE cxx_std_17)
+hggf_enable_project_warnings(BassFinisherControllerContractTests)
+add_test(NAME BassFinisherControllerContractTests COMMAND BassFinisherControllerContractTests)
