@@ -765,8 +765,7 @@ tresult PLUGIN_API Processor::setState(IBStream* state) {
 
     int32 version = 0;
     if (!stream.readInt32(version) ||
-        version < kFirstSupportedStateVersion ||
-        version > kStateVersion) {
+        version != kStateVersion) {
         return kResultFalse;
     }
 
@@ -780,10 +779,7 @@ tresult PLUGIN_API Processor::setState(IBStream* state) {
     }
 
     ToneMatchStatePayload nextToneMatch {};
-    if (!readToneMatchState(
-            stream,
-            nextToneMatch,
-            version))
+    if (!readToneMatchState(stream, nextToneMatch))
         return kResultFalse;
 
     dsp::ToneMatchSpectrumSnapshot nextReferenceSpectrum {};

@@ -39,19 +39,12 @@ private:
         double amount) noexcept;
 
     void resetFilters() noexcept;
-    double processFirSample(
-        double input,
-        std::array<double, 2 * kToneMatchFirTapCount>& history) noexcept;
 
     std::array<Biquad, 2> lowShelf_ {};
     std::array<
         std::array<Biquad, 2>,
         kToneMatchPeakCount> peaks_ {};
     std::array<Biquad, 2> highShelf_ {};
-
-    std::array<double, 2 * kToneMatchFirTapCount> firHistoryLeft_ {};
-    std::array<double, 2 * kToneMatchFirTapCount> firHistoryRight_ {};
-    std::size_t firWriteIndex_ {0};
 
     ToneMatchProfile profile_ {};
 

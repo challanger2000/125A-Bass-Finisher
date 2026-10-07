@@ -8,7 +8,7 @@ namespace HighGainGuitarFinisher {
 
 class ToneMatchProfileCodec {
 public:
-    static constexpr int kFileVersion = 2;
+    static constexpr int kFileVersion = 1;
 
     static std::string encode(
         const dsp::ToneMatchProfile& profile);

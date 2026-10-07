@@ -165,46 +165,6 @@ void verifyBassContextDoesNotWeakenMatch() {
         1.0e-12);
 }
 
-
-ToneMatchProfile firGainProfile() {
-    ToneMatchProfile p {};
-    p.valid = true;
-    p.firValid = true;
-    p.firTaps.fill(0.0);
-    p.firTaps[0] = 2.0;
-    return p;
-}
-
-void verifyFirPath() {
-    ToneMatchDSP dsp;
-    dsp.prepare(48000.0);
-    dsp.setProfile(firGainProfile());
-    dsp.setAmount(1.0);
-    dsp.reset();
-
-    for (int i = 0; i < 2048; ++i) {
-        const double x =
-            0.05 *
-            std::sin(
-                2.0 * kPi *
-                440.0 *
-                static_cast<double>(i) /
-                48000.0);
-
-        double l = x;
-        double r = x;
-        dsp.processFrame(l, r);
-
-        BF_REQUIRE(
-            std::abs(l - 2.0 * x) <
-            1.0e-10);
-
-        BF_REQUIRE(
-            std::abs(r - 2.0 * x) <
-            1.0e-10);
-    }
-}
-
 void verifySanitization() {
     ToneMatchDSP dsp;
     dsp.prepare(48000.0);
@@ -233,7 +193,6 @@ int main() {
     verifyZeroExact();
     verifyAmountLawAndRates();
     verifyBassContextDoesNotWeakenMatch();
-    verifyFirPath();
     verifySanitization();
     std::cout << "Bass Finisher Tone Match core tests passed\n";
     return 0;

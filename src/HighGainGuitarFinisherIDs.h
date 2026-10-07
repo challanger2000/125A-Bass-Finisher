@@ -22,7 +22,7 @@ enum ParamID : Steinberg::Vst::ParamID {
 };
 
 // Bass Finisher V1 owns an independent state contract.
-constexpr Steinberg::int32 kStateVersion = 2;
+constexpr Steinberg::int32 kStateVersion = 1;
 constexpr Steinberg::int32 kFirstSupportedStateVersion = 1;
 
 } // namespace HighGainGuitarFinisher

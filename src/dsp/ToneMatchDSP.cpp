@@ -51,10 +51,6 @@ void ToneMatchDSP::resetFilters() noexcept {
 
     for (auto& filter : highShelf_)
         filter.reset();
-
-    firHistoryLeft_.fill(0.0);
-    firHistoryRight_.fill(0.0);
-    firWriteIndex_ = 0;
 }
 
 void ToneMatchDSP::reset() noexcept {
@@ -176,21 +172,6 @@ void ToneMatchDSP::sanitizeProfile(
                 0.0),
             -kMaximumGainDb,
             kMaximumGainDb);
-
-    if (profile_.firValid) {
-        bool anyFiniteEnergy = false;
-
-        for (double& tap : profile_.firTaps) {
-            tap = finiteOr(tap, 0.0);
-            tap = std::clamp(tap, -8.0, 8.0);
-            anyFiniteEnergy =
-                anyFiniteEnergy ||
-                std::abs(tap) > 1.0e-15;
-        }
-
-        if (!anyFiniteEnergy)
-            profile_.firValid = false;
-    }
 }
 
 void ToneMatchDSP::setProfile(
@@ -287,34 +268,6 @@ void ToneMatchDSP::updateCoefficients(
         kCoefficientUpdateInterval;
 }
 
-double ToneMatchDSP::processFirSample(
-    double input,
-    std::array<double, 2 * kToneMatchFirTapCount>& history) noexcept {
-
-    history[firWriteIndex_] = input;
-    history[firWriteIndex_ + kToneMatchFirTapCount] = input;
-
-    const double* samples =
-        history.data() + firWriteIndex_;
-
-    long double sum = 0.0L;
-
-    for (std::size_t i = 0;
-         i < kToneMatchFirTapCount;
-         ++i) {
-        sum +=
-            static_cast<long double>(profile_.firTaps[i]) *
-            static_cast<long double>(samples[i]);
-    }
-
-    const double output =
-        static_cast<double>(sum);
-
-    return std::isfinite(output)
-        ? output
-        : 0.0;
-}
-
 void ToneMatchDSP::processFrame(
     double& left,
     double& right) noexcept {
@@ -360,65 +313,35 @@ void ToneMatchDSP::processFrame(
 
     bypassState_ = false;
 
-    if (profile_.firValid) {
-        firWriteIndex_ =
-            (firWriteIndex_ +
-             kToneMatchFirTapCount - 1u) %
-            kToneMatchFirTapCount;
+    if (--coefficientCountdown_ <= 0 ||
+        std::abs(
+            amountSmoothed_ -
+            lastCoefficientAmount_) >
+            0.005) {
 
-        const double dryLeft = left;
-        const double dryRight = right;
-
-        const double wetLeft =
-            processFirSample(
-                dryLeft,
-                firHistoryLeft_);
-
-        const double wetRight =
-            processFirSample(
-                dryRight,
-                firHistoryRight_);
-
-        left =
-            dryLeft +
-            (wetLeft - dryLeft) *
-                amountSmoothed_;
-
-        right =
-            dryRight +
-            (wetRight - dryRight) *
-                amountSmoothed_;
-    } else {
-        if (--coefficientCountdown_ <= 0 ||
-            std::abs(
-                amountSmoothed_ -
-                lastCoefficientAmount_) >
-                0.005) {
-
-            updateCoefficients(
-                amountSmoothed_);
-        }
-
-        left =
-            lowShelf_[0].process(left);
-
-        right =
-            lowShelf_[1].process(right);
-
-        for (auto& band : peaks_) {
-            left =
-                band[0].process(left);
-
-            right =
-                band[1].process(right);
-        }
-
-        left =
-            highShelf_[0].process(left);
-
-        right =
-            highShelf_[1].process(right);
+        updateCoefficients(
+            amountSmoothed_);
     }
+
+    left =
+        lowShelf_[0].process(left);
+
+    right =
+        lowShelf_[1].process(right);
+
+    for (auto& band : peaks_) {
+        left =
+            band[0].process(left);
+
+        right =
+            band[1].process(right);
+    }
+
+    left =
+        highShelf_[0].process(left);
+
+    right =
+        highShelf_[1].process(right);
 
     if (!std::isfinite(left))
         left = 0.0;

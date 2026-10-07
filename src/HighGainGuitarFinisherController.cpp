@@ -909,8 +909,7 @@ Controller::setComponentState(
 
     int32 version = 0;
     if (!stream.readInt32(version) ||
-        version < kFirstSupportedStateVersion ||
-        version > kStateVersion) {
+        version != kStateVersion) {
         return kResultFalse;
     }
 
@@ -924,10 +923,7 @@ Controller::setComponentState(
     }
 
     ToneMatchStatePayload nextToneMatch {};
-    if (!readToneMatchState(
-            stream,
-            nextToneMatch,
-            version))
+    if (!readToneMatchState(stream, nextToneMatch))
         return kResultFalse;
 
     dsp::ToneMatchSpectrumSnapshot nextReferenceSpectrum {};
