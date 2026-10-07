@@ -9,6 +9,9 @@
 
 namespace HighGainGuitarFinisher::dsp {
 
+inline constexpr std::size_t kToneMatchTemporalCurveBins = 96;
+inline constexpr std::size_t kToneMatchTemporalFrameSlots = 64;
+
 struct ToneMatchSpectrumSnapshot {
     double sampleRate {44100.0};
     std::uint64_t frameCount {0};
@@ -27,7 +30,9 @@ struct ToneMatchSpectrumSnapshot {
     // required for backwards compatibility; meanDb remains the fallback.
     bool hasTemporalCurve {false};
     std::uint32_t temporalFrameCount {0};
-    std::array<float, kTemporalFrameSlots * kTemporalCurveBins> temporalDb {};
+    std::array<float,
+        kToneMatchTemporalFrameSlots *
+        kToneMatchTemporalCurveBins> temporalDb {};
 };
 
 class ToneMatchAnalyzer {
@@ -40,8 +45,10 @@ public:
     static constexpr std::size_t kAnalysisFftSize = 16384;
     static constexpr std::size_t kHopSize = kAnalysisFftSize / 2;
     static constexpr std::size_t kCurveBins = 512;
-    static constexpr std::size_t kTemporalCurveBins = 96;
-    static constexpr std::size_t kTemporalFrameSlots = 64;
+    static constexpr std::size_t kTemporalCurveBins =
+        kToneMatchTemporalCurveBins;
+    static constexpr std::size_t kTemporalFrameSlots =
+        kToneMatchTemporalFrameSlots;
     static constexpr double kCurveMinimumHz = 30.0;
     static constexpr double kCurveMaximumHz = 12000.0;
 
