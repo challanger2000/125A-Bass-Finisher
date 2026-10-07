@@ -22,7 +22,7 @@ namespace {
 constexpr double kFs = 48000.0;
 constexpr int32 kBlock = 256;
 
-void addChange(ParameterChanges& changes, ParamID id, ParamValue value) {
+void addChange(ParameterChanges& changes, Steinberg::Vst::ParamID id, ParamValue value) {
     int32 queueIndex = 0;
     auto* queue = changes.addParameterData(id, queueIndex);
     BF_REQUIRE(queue != nullptr);
@@ -62,9 +62,9 @@ void verifyParameterFlush() {
     BF_REQUIRE(p.setupProcessing(setup) == kResultOk);
 
     ParameterChanges changes(3);
-    addChange(changes, kFinish, 0.73);
-    addChange(changes, kOutput, 0.61);
-    addChange(changes, kMass, 0.42);
+    addChange(changes, HighGainGuitarFinisher::kFinish, 0.73);
+    addChange(changes, HighGainGuitarFinisher::kOutput, 0.61);
+    addChange(changes, HighGainGuitarFinisher::kMass, 0.42);
 
     ProcessData flush {};
     flush.processMode = kRealtime;
