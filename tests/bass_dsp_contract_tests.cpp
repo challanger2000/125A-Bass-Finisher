@@ -3,9 +3,11 @@
 #include "LowCutMapping.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <vector>
 
 using HighGainGuitarFinisher::dsp::MetalFinisherDSP;
 using HighGainGuitarFinisher::dsp::lowCutNormalizedFromFrequency;
@@ -217,49 +219,456 @@ void verifyBassMassContract() {
     BF_REQUIRE(highCut110 < off75);
 }
 
-void verifyFinishModesAreFiniteDistinctAndLevelBounded() {
-    double signatures[3] {};
-    const double modes[3] {0.0, 0.5, 1.0};
 
-    for (int m = 0; m < 3; ++m) {
-        MetalFinisherDSP dsp;
-        dsp.prepare(kFs);
-        dsp.setMode(modes[m]);
-        dsp.setFinish(1.0);
-        dsp.setMass(0.0);
-        dsp.setLowCut(0.0);
-        dsp.setToneMatchAmount(0.0);
-        dsp.reset();
+struct ModeMeasurement {
+    double rms {0.0};
+    double peak {0.0};
+    double crestDb {0.0};
+    std::array<double, 4> toneAmplitude {};
+    std::vector<double> rendered {};
+};
 
-        long double diff = 0.0L;
-        for (int i = 0; i < static_cast<int>(kFs * 3.0); ++i) {
-            const double t = static_cast<double>(i) / kFs;
-            const double pulse = std::fmod(t, 0.25) < 0.050 ? 1.0 : 0.22;
-            const double x =
-                pulse * (0.34 * std::sin(2.0*kPi*55.0*t) +
-                         0.22 * std::sin(2.0*kPi*110.0*t)) +
-                0.18 * std::sin(2.0*kPi*180.0*t) +
-                0.12 * std::sin(2.0*kPi*900.0*t) +
-                0.08 * std::sin(2.0*kPi*2200.0*t) +
-                0.05 * std::sin(2.0*kPi*5200.0*t);
+ModeMeasurement measureFinishMode(double mode) {
+    MetalFinisherDSP dsp;
+    dsp.prepare(kFs);
+    dsp.setMode(mode);
+    dsp.setFinish(1.0);
+    dsp.setMass(0.0);
+    dsp.setLowCut(0.0);
+    dsp.setToneMatchAmount(0.0);
+    dsp.reset();
 
-            double l = x;
-            double r = 0.98*x + 0.01*std::sin(2.0*kPi*1450.0*t);
-            dsp.processFrame(l, r);
-            BF_REQUIRE(std::isfinite(l) && std::isfinite(r));
-            const long double dl = static_cast<long double>(l - x);
-            diff += dl * dl;
+    constexpr int total =
+        static_cast<int>(kFs * 4.0);
+
+    constexpr int start =
+        static_cast<int>(kFs * 2.0);
+
+    constexpr std::array<double, 4> probeHz {
+        55.0,
+        900.0,
+        3200.0,
+        6500.0
+    };
+
+    long double power = 0.0L;
+    double peak = 0.0;
+    std::array<long double, 4> sinAcc {};
+    std::array<long double, 4> cosAcc {};
+    int count = 0;
+
+    ModeMeasurement result;
+    result.rendered.reserve(
+        static_cast<std::size_t>(
+            total - start));
+
+    for (int i = 0; i < total; ++i) {
+        const double t =
+            static_cast<double>(i) / kFs;
+
+        const double pulse =
+            std::fmod(t, 0.25) < 0.050
+                ? 1.0
+                : 0.22;
+
+        const double x =
+            pulse *
+                (0.34 *
+                     std::sin(
+                         2.0 * kPi *
+                         55.0 * t) +
+                 0.22 *
+                     std::sin(
+                         2.0 * kPi *
+                         110.0 * t)) +
+            0.18 *
+                std::sin(
+                    2.0 * kPi *
+                    180.0 * t) +
+            0.12 *
+                std::sin(
+                    2.0 * kPi *
+                    900.0 * t) +
+            0.08 *
+                std::sin(
+                    2.0 * kPi *
+                    3200.0 * t) +
+            0.05 *
+                std::sin(
+                    2.0 * kPi *
+                    6500.0 * t);
+
+        double l = x;
+        double r =
+            0.98 * x +
+            0.01 *
+                std::sin(
+                    2.0 * kPi *
+                    1450.0 * t);
+
+        dsp.processFrame(l, r);
+
+        BF_REQUIRE(
+            std::isfinite(l) &&
+            std::isfinite(r));
+
+        if (i >= start) {
+            const double mono =
+                0.5 * (l + r);
+
+            result.rendered.push_back(
+                mono);
+
+            power +=
+                static_cast<long double>(
+                    mono * mono);
+
+            peak =
+                std::max(
+                    peak,
+                    std::abs(mono));
+
+            for (std::size_t band = 0;
+                 band < probeHz.size();
+                 ++band) {
+
+                const double phase =
+                    2.0 * kPi *
+                    probeHz[band] *
+                    t;
+
+                sinAcc[band] +=
+                    static_cast<long double>(
+                        mono *
+                        std::sin(phase));
+
+                cosAcc[band] +=
+                    static_cast<long double>(
+                        mono *
+                        std::cos(phase));
+            }
+
+            ++count;
         }
-
-        signatures[m] = static_cast<double>(diff);
-        BF_REQUIRE(std::abs(dsp.currentAutoLevelGainDb()) <= 3.0001);
-        BF_REQUIRE(signatures[m] > 1.0e-8);
     }
 
-    BF_REQUIRE(std::abs(signatures[0] - signatures[1]) > 1.0e-6);
-    BF_REQUIRE(std::abs(signatures[1] - signatures[2]) > 1.0e-6);
+    result.rms =
+        std::sqrt(
+            static_cast<double>(
+                power /
+                static_cast<long double>(
+                    count)));
+
+    result.peak = peak;
+
+    BF_REQUIRE(result.rms > 0.0);
+
+    result.crestDb =
+        20.0 *
+        std::log10(
+            result.peak /
+            result.rms);
+
+    for (std::size_t band = 0;
+         band < probeHz.size();
+         ++band) {
+
+        result.toneAmplitude[band] =
+            2.0 *
+            std::sqrt(
+                static_cast<double>(
+                    sinAcc[band] *
+                        sinAcc[band] +
+                    cosAcc[band] *
+                        cosAcc[band])) /
+            static_cast<double>(
+                count);
+    }
+
+    BF_REQUIRE(
+        std::abs(
+            dsp.currentAutoLevelGainDb()) <=
+        3.0001);
+
+    return result;
 }
 
+double normalizedRenderDifference(
+    const ModeMeasurement& a,
+    const ModeMeasurement& b) {
+
+    BF_REQUIRE(
+        a.rendered.size() ==
+        b.rendered.size());
+
+    long double diffPower = 0.0L;
+    long double referencePower = 0.0L;
+
+    for (std::size_t i = 0;
+         i < a.rendered.size();
+         ++i) {
+
+        const long double d =
+            static_cast<long double>(
+                a.rendered[i] -
+                b.rendered[i]);
+
+        const long double ref =
+            0.5L *
+            static_cast<long double>(
+                a.rendered[i] +
+                b.rendered[i]);
+
+        diffPower += d * d;
+        referencePower += ref * ref;
+    }
+
+    BF_REQUIRE(referencePower > 0.0L);
+
+    return
+        std::sqrt(
+            static_cast<double>(
+                diffPower /
+                referencePower));
+}
+
+double modeThirdHarmonicAmplitude(
+    double mode) {
+
+    MetalFinisherDSP dsp;
+    dsp.prepare(kFs);
+    dsp.setMode(mode);
+    dsp.setFinish(1.0);
+    dsp.setMass(0.0);
+    dsp.setLowCut(0.0);
+    dsp.setToneMatchAmount(0.0);
+    dsp.reset();
+
+    constexpr double fundamental =
+        300.0;
+
+    constexpr double harmonic =
+        900.0;
+
+    constexpr int total =
+        static_cast<int>(
+            kFs * 3.0);
+
+    constexpr int start =
+        static_cast<int>(
+            kFs * 2.0);
+
+    long double sinAcc = 0.0L;
+    long double cosAcc = 0.0L;
+    int count = 0;
+
+    for (int i = 0;
+         i < total;
+         ++i) {
+
+        const double t =
+            static_cast<double>(i) /
+            kFs;
+
+        const double x =
+            0.22 *
+            std::sin(
+                2.0 * kPi *
+                fundamental *
+                t);
+
+        double l = x;
+        double r = x;
+
+        dsp.processFrame(l, r);
+
+        if (i >= start) {
+            const double phase =
+                2.0 * kPi *
+                harmonic *
+                t;
+
+            sinAcc +=
+                static_cast<long double>(
+                    l *
+                    std::sin(phase));
+
+            cosAcc +=
+                static_cast<long double>(
+                    l *
+                    std::cos(phase));
+
+            ++count;
+        }
+    }
+
+    return
+        2.0 *
+        std::sqrt(
+            static_cast<double>(
+                sinAcc * sinAcc +
+                cosAcc * cosAcc)) /
+        static_cast<double>(
+            count);
+}
+
+void verifyFinishModesAreFiniteDistinctAndLevelBounded() {
+    constexpr std::array<double, 3> modes {
+        0.0,
+        0.5,
+        1.0
+    };
+
+    std::array<ModeMeasurement, 3> measured {};
+
+    for (std::size_t i = 0;
+         i < modes.size();
+         ++i) {
+
+        measured[i] =
+            measureFinishMode(
+                modes[i]);
+
+        BF_REQUIRE(
+            std::isfinite(
+                measured[i].rms));
+
+        BF_REQUIRE(
+            std::isfinite(
+                measured[i].crestDb));
+
+        for (const double amplitude :
+             measured[i].toneAmplitude) {
+
+            BF_REQUIRE(
+                std::isfinite(
+                    amplitude));
+
+            BF_REQUIRE(
+                amplitude >= 0.0);
+        }
+    }
+
+    const double cleanPunch =
+        normalizedRenderDifference(
+            measured[0],
+            measured[1]);
+
+    const double punchDense =
+        normalizedRenderDifference(
+            measured[1],
+            measured[2]);
+
+    const double cleanDense =
+        normalizedRenderDifference(
+            measured[0],
+            measured[2]);
+
+    // A mode is a product feature, not merely a different enum value.
+    // Require at least 0.2% normalized waveform separation for adjacent
+    // modes and a larger separation between the endpoints.
+    BF_REQUIRE(cleanPunch > 0.0020);
+    BF_REQUIRE(punchDense > 0.0020);
+    BF_REQUIRE(cleanDense > 0.0030);
+
+    // The spectral contract must not collapse to three level-shifted copies.
+    // Across the bass/body, articulation, harshness and fizz probes, every
+    // adjacent mode pair must differ by at least 0.05 dB in one measured
+    // region.
+    const auto maxBandDeltaDb =
+        [](const ModeMeasurement& a,
+           const ModeMeasurement& b) {
+
+            double maximum = 0.0;
+
+            for (std::size_t i = 0;
+                 i < a.toneAmplitude.size();
+                 ++i) {
+
+                const double aa =
+                    std::max(
+                        a.toneAmplitude[i],
+                        1.0e-12);
+
+                const double bb =
+                    std::max(
+                        b.toneAmplitude[i],
+                        1.0e-12);
+
+                maximum =
+                    std::max(
+                        maximum,
+                        std::abs(
+                            20.0 *
+                            std::log10(
+                                aa / bb)));
+            }
+
+            return maximum;
+        };
+
+    BF_REQUIRE(
+        maxBandDeltaDb(
+            measured[0],
+            measured[1]) >
+        0.05);
+
+    BF_REQUIRE(
+        maxBandDeltaDb(
+            measured[1],
+            measured[2]) >
+        0.05);
+
+    // Transient shape must not be bit-for-bit identical between all modes.
+    // This is intentionally a small floor because adaptive material can make
+    // crest changes program-dependent; it still catches a disconnected mode
+    // parameter.
+    const double crestSpread =
+        std::max({
+            measured[0].crestDb,
+            measured[1].crestDb,
+            measured[2].crestDb
+        }) -
+        std::min({
+            measured[0].crestDb,
+            measured[1].crestDb,
+            measured[2].crestDb
+        });
+
+    BF_REQUIRE(crestSpread > 0.01);
+
+    // Nonlinear density is explicitly ordered by design:
+    // CLEAN < PUNCH < DENSE.
+    const double h3Clean =
+        modeThirdHarmonicAmplitude(
+            modes[0]);
+
+    const double h3Punch =
+        modeThirdHarmonicAmplitude(
+            modes[1]);
+
+    const double h3Dense =
+        modeThirdHarmonicAmplitude(
+            modes[2]);
+
+    BF_REQUIRE(h3Clean > 0.0);
+    BF_REQUIRE(h3Punch > h3Clean);
+    BF_REQUIRE(h3Dense > h3Punch);
+
+    std::cout
+        << "Mode QA: "
+        << "diff CP=" << cleanPunch
+        << ", PD=" << punchDense
+        << ", CD=" << cleanDense
+        << " | crest="
+        << measured[0].crestDb << "/"
+        << measured[1].crestDb << "/"
+        << measured[2].crestDb
+        << " dB | H3="
+        << h3Clean << "/"
+        << h3Punch << "/"
+        << h3Dense
+        << "\n";
 }
 
 
