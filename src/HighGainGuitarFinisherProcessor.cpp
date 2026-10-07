@@ -460,11 +460,7 @@ void Processor::syncDSPParameters() noexcept {
     finisher_.setLowCut(lowCut_);
     finisher_.setMode(mode_);
     finisher_.setMass(mass_);
-    finisher_.setDelayWet(delayWet_);
-    finisher_.setDelayFeedback(delayFeedback_);
-    finisher_.setDelayDivision(delayDivision_);
     finisher_.setToneMatchAmount(toneMatchAmount_);
-    finisher_.setTempo(tempoBpm_);
 }
 
 template <typename Sample>
