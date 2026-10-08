@@ -802,6 +802,208 @@ void verifyRealProgramMaterialBeatsPreviousBest() {
         kPreviousBestRealDistance);
 }
 
+
+double shapedDb(
+    double frequency,
+    double lowShelfDb,
+    double lowShelfHz,
+    double highShelfDb,
+    double highShelfHz,
+    const std::array<std::array<double, 3>, 4>& peaks) {
+
+    const double low =
+        lowShelfDb /
+        (1.0 +
+         std::pow(
+             frequency /
+             std::max(lowShelfHz, 1.0),
+             3.0));
+
+    const double high =
+        highShelfDb *
+        (1.0 -
+         1.0 /
+         (1.0 +
+          std::pow(
+              frequency /
+              std::max(highShelfHz, 1.0),
+              3.0)));
+
+    double result =
+        low + high;
+
+    for (const auto& p : peaks) {
+        result +=
+            p[1] *
+            gaussianLog(
+                frequency,
+                p[0],
+                p[2]);
+    }
+
+    return result;
+}
+
+ToneMatchSpectrumSnapshot makeGeneralizationReference(
+    double sampleRate,
+    double lowShelfDb,
+    double lowShelfHz,
+    double highShelfDb,
+    double highShelfHz,
+    const std::array<std::array<double, 3>, 4>& peaks) {
+
+    auto s =
+        makeTarget(sampleRate);
+
+    for (std::size_t i = 1;
+         i < s.meanPower.size();
+         ++i) {
+
+        const double frequency =
+            static_cast<double>(i) *
+            sampleRate /
+            ToneMatchAnalyzer::kFftSize;
+
+        const double db =
+            shapedDb(
+                frequency,
+                lowShelfDb,
+                lowShelfHz,
+                highShelfDb,
+                highShelfHz,
+                peaks);
+
+        s.meanPower[i] *=
+            std::pow(
+                10.0,
+                db / 10.0);
+    }
+
+    return s;
+}
+
+void verifyGeneralizationSuite() {
+    struct Case {
+        double lowShelfDb;
+        double lowShelfHz;
+        double highShelfDb;
+        double highShelfHz;
+        std::array<std::array<double, 3>, 4> peaks;
+    };
+
+    constexpr std::array<Case, 12> cases {{
+        { 8.0, 70.0, -6.0, 6500.0, {{{120.0, 5.0, 0.22},{420.0,-7.0,0.20},{1800.0,6.0,0.18},{5200.0,-5.0,0.14}}}},
+        {-10.0,55.0, 7.0, 7200.0, {{{90.0,-6.0,0.18},{300.0,8.0,0.24},{1300.0,-9.0,0.16},{4100.0,7.0,0.18}}}},
+        { 4.0, 95.0, 9.0, 5000.0, {{{160.0,-5.0,0.25},{650.0,10.0,0.13},{2400.0,-8.0,0.17},{8200.0,6.0,0.15}}}},
+        {-7.0,80.0,-8.0, 8000.0, {{{70.0, 8.0,0.16},{520.0,-10.0,0.15},{1700.0,9.0,0.12},{6200.0,-7.0,0.20}}}},
+        {12.0,60.0, 5.0, 9000.0, {{{110.0,-8.0,0.18},{900.0,11.0,0.10},{3100.0,-10.0,0.11},{7000.0,8.0,0.13}}}},
+        {-12.0,90.0,10.0, 6000.0, {{{140.0,7.0,0.14},{760.0,-11.0,0.09},{2200.0,10.0,0.14},{4800.0,-9.0,0.16}}}},
+        { 0.0,80.0, 0.0, 7000.0, {{{65.0,14.0,0.10},{260.0,-12.0,0.08},{1450.0,13.0,0.09},{3600.0,-11.0,0.10}}}},
+        { 6.0,50.0,-11.0,5500.0, {{{100.0,5.0,0.28},{430.0,9.0,0.20},{1200.0,-12.0,0.12},{9300.0,8.0,0.11}}}},
+        {-5.0,120.0,12.0,4500.0, {{{180.0,-7.0,0.17},{840.0,12.0,0.11},{2600.0,-10.0,0.13},{6100.0,10.0,0.10}}}},
+        {10.0,75.0,-10.0,8500.0, {{{135.0,-9.0,0.12},{570.0,13.0,0.10},{1900.0,-12.0,0.08},{7500.0,9.0,0.12}}}},
+        {-8.0,65.0, 6.0,5200.0, {{{85.0,10.0,0.14},{350.0,-9.0,0.18},{2800.0,11.0,0.10},{9800.0,-8.0,0.10}}}},
+        {14.0,55.0,-12.0,6800.0, {{{115.0,-10.0,0.12},{720.0,14.0,0.09},{2100.0,-13.0,0.10},{5600.0,12.0,0.11}}}}
+    }};
+
+    double sumBefore = 0.0;
+    double sumAfter = 0.0;
+    double worstAfter = 0.0;
+    double worstRatio = 0.0;
+
+    for (std::size_t i = 0;
+         i < cases.size();
+         ++i) {
+
+        const auto target =
+            makeTarget(48000.0);
+
+        const auto reference =
+            makeGeneralizationReference(
+                48000.0,
+                cases[i].lowShelfDb,
+                cases[i].lowShelfHz,
+                cases[i].highShelfDb,
+                cases[i].highShelfHz,
+                cases[i].peaks);
+
+        const auto profile =
+            ToneMatchAnalyzer::makeProfile(
+                reference,
+                target);
+
+        BF_REQUIRE(profile.valid);
+        BF_REQUIRE(profile.firValid);
+
+        const double before =
+            distance(
+                reference,
+                target,
+                nullptr);
+
+        const double after =
+            distance(
+                reference,
+                target,
+                &profile);
+
+        const double ratio =
+            after /
+            std::max(
+                before,
+                1.0e-9);
+
+        sumBefore += before;
+        sumAfter += after;
+        worstAfter =
+            std::max(
+                worstAfter,
+                after);
+        worstRatio =
+            std::max(
+                worstRatio,
+                ratio);
+
+        std::cout
+            << "GENERAL MATCH case "
+            << i
+            << ": before="
+            << before
+            << " dB, after="
+            << after
+            << " dB, ratio="
+            << ratio
+            << "\n";
+
+        BF_REQUIRE(after < before);
+    }
+
+    const double meanBefore =
+        sumBefore /
+        static_cast<double>(
+            cases.size());
+
+    const double meanAfter =
+        sumAfter /
+        static_cast<double>(
+            cases.size());
+
+    std::cout
+        << "GENERAL MATCH summary: mean-before="
+        << meanBefore
+        << " dB, mean-after="
+        << meanAfter
+        << " dB, worst-after="
+        << worstAfter
+        << " dB, worst-ratio="
+        << worstRatio
+        << "\n";
+
+    BF_REQUIRE(meanAfter < meanBefore * 0.20);
+    BF_REQUIRE(worstRatio < 0.35);
+    BF_REQUIRE(worstAfter < 1.75);
+}
+
 void verifyMeasuredAnalyzerSeparatesLevelFromTone() {
     auto quiet =
         std::make_unique<ToneMatchAnalyzer>();
@@ -907,6 +1109,7 @@ int main() {
     verifyAbsoluteLevelIsNotTone();
     verifyAnalyzerHasNoUpperDbCeiling();
     verifyRealProgramMaterialBeatsPreviousBest();
+    verifyGeneralizationSuite();
     verifyMeasuredAnalyzerSeparatesLevelFromTone();
 
     std::cout
