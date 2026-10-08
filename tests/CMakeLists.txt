@@ -162,4 +162,5 @@ add_test(NAME BassFinisherControllerContractTests COMMAND BassFinisherController
 if(MSVC)
     target_link_options(BassFinisherStateV1Tests PRIVATE /STACK:8388608)
     target_link_options(BassFinisherProcessorContractTests PRIVATE /STACK:8388608)
+    target_link_options(BassFinisherToneMatchQualityTests PRIVATE /STACK:8388608)
 endif()
