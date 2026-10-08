@@ -6,15 +6,15 @@ Development branch: `v1.0.0-engineering`.
 
 ## Minimum 125A release gate
 
-| Gate | Evidence in Bass Finisher | Status before current-head CI |
+| Gate | Evidence in Bass Finisher | Current audit status |
 | --- | --- | --- |
-| Steinberg VST3 Validator | Build workflow and 125A Plugin Tester | PASS on prior audited build; current-head confirmation pending |
-| 125A Plugin Tester | Pinned v0.2.9 full release workflow | PASS on prior audited build (48 PASS / 0 WARNING / 0 FAIL); current-head confirmation pending |
-| Editor lifecycle | Controller contract open/attach/detach/reopen + Plugin Tester lifecycle probe | PASS on prior audited build; current-head confirmation pending |
+| Steinberg VST3 Validator | Build workflow and 125A Plugin Tester | Normal CI #100 PASS; Full Release QA current-head confirmation pending |
+| 125A Plugin Tester | Pinned v0.2.9 full release workflow | Prior Full Release QA PASS (48 PASS / 0 WARNING / 0 FAIL); current-head Full Release QA pending |
+| Editor lifecycle | Controller contract open/attach/detach/reopen + Plugin Tester lifecycle probe | Normal CI #100 PASS; Full Release QA current-head confirmation pending |
 | I/O and event probe | Processor contract + Plugin Tester isolated I/O/Event probe | PASS on prior audited build |
 | Offline/lifecycle/audio torture | Processor active-path matrix + repeated activate/process/deactivate + Plugin Tester worker | PASS on prior audited build |
 | State save/restore | State serialization/atomicity tests | PASS |
-| State restores audible result | New current-head processor render equality regression | PENDING current-head CI |
+| State restores audible result | New current-head processor render equality regression | PASS in normal CI #100; Full Release QA confirmation pending |
 | Automation | Automation math + sample-accurate processor automation | PASS |
 | Ctrl + left-click defaults | New current-head real VSTGUI Ctrl-click dispatch test on MATCH, FINISH, LOW CONTROL, MASS, OUTPUT custom knobs | PENDING current-head CI |
 | Bypass | Crossfade contract + Plugin Tester real bypass stress | PASS on prior audited build |
@@ -24,8 +24,8 @@ Development branch: `v1.0.0-engineering`.
 | NaN/Inf | DSP recovery + Plugin Tester | PASS |
 | Denormal/subnormal | Processor torture + Plugin Tester | PASS |
 | No unexpected callback allocations | Existing DSP allocation test plus new full `Processor::process()` allocation gate | PENDING current-head CI |
-| Deterministic DSP regression | exact block-partition/realtime-offline equality + MATCH quality + mode-separation regressions | PASS / current mode hardening pending current-head CI |
-| Latency/tail | Explicit 0-sample latency and 0-sample tail processor contract | PENDING current-head CI for explicit latency assertion |
+| Deterministic DSP regression | exact block-partition/realtime-offline equality + MATCH quality + mode-separation regressions | PASS in normal CI #100 |
+| Latency/tail | Explicit 0-sample latency and 0-sample tail processor contract | PASS in normal CI #100 |
 
 ## Measurement-specific Bass evidence
 
@@ -44,11 +44,15 @@ Measured mono RMS for the same files:
 - full chain: -24.04 dBFS
 - reference: -26.16 dBFS
 
-For a 16-band log-spaced 35 Hz–10 kHz Welch spectral-shape comparison with broadband offset removed:
-- Bypass -> Reference RMS band error: **4.323 dB**
-- MATCH -> Reference RMS band error: **3.339 dB**
+For the current 4096-tap production MATCH path, the retained real-program regression reports:
+- Before MATCH: **7.29387 dB**
+- After MATCH: **0.649709 dB**
+- Error reduction: **~91.1%**
+- Generalization mean after MATCH: **0.376525 dB**
+- Generalization worst after MATCH: **0.795273 dB**
+- FIR curve residual: **0.91212 dB RMS**, with **3/512** severe bins over 4 dB
 
-Therefore MATCH measurably moves this real bass programme material toward the reference spectral shape. These hashed files are release-session evidence; they are not redistributed by the public repository because provenance/redistribution rights are not established.
+Therefore MATCH measurably and substantially moves the real bass programme material toward the reference spectral shape. These hashed files are release-session evidence; they are not redistributed by the public repository because provenance/redistribution rights are not established.
 
 ## Nonlinear / DSP evidence
 
@@ -60,11 +64,17 @@ Therefore MATCH measurably moves this real bass programme material toward the re
 - LOW CONTROL adaptive sub containment has a measured regression against the same static high-pass boundary.
 - MASS response changes with LOW CONTROL and is guarded by measured frequency-response tests.
 
+## Current-head audit additions
+
+- Normal CI **#100** on commit `a0d038d2a4db876f39ca058fec678d70b305a9ca` is green.
+- Exact 0%-neutrality now includes hot near/full-scale peaks; FINAL is inactive on the fully neutral path and remains active on production paths.
+- MATCH worker UI lifecycle is non-blocking for Clear/state/new-match invalidation; obsolete generations are discarded and only the newest queued request is applied.
+- Worker exceptions are contained and converted to MATCH failure instead of terminating the host.
+
 ## Remaining release decision
 
 Do not label the current branch RELEASE READY until:
-1. the current-head normal CI is green;
-2. the current-head **Bass Finisher Full Release QA** workflow is green, including internal CTests and 125A Plugin Tester v0.2.9;
-3. the exact VST3 artifact handed to the user is taken from that full release QA run.
+1. the current-head **Bass Finisher Full Release QA** workflow is green, including internal CTests and 125A Plugin Tester v0.2.9;
+2. the exact VST3 artifact handed to the user is taken from that full release QA run.
 
 No subjective hearing result is required to substitute for any of the objective gates above.
