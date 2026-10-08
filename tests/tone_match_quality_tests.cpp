@@ -1004,6 +1004,125 @@ void verifyGeneralizationSuite() {
     BF_REQUIRE(worstAfter < 1.75);
 }
 
+
+void verifyFirTracksMeasuredDifferenceCurve() {
+    ToneMatchSpectrumSnapshot reference {};
+    ToneMatchSpectrumSnapshot target {};
+
+    reference.sampleRate = 44100.0;
+    target.sampleRate = 44100.0;
+    reference.frameCount = 1474u;
+    target.frameCount = 85u;
+    reference.hasLogCurve = true;
+    target.hasLogCurve = true;
+
+    reference.meanDb =
+        kRealDifference512;
+
+    target.meanDb.fill(0.0);
+
+    const auto profile =
+        ToneMatchAnalyzer::makeProfile(
+            reference,
+            target);
+
+    BF_REQUIRE(profile.valid);
+    BF_REQUIRE(profile.firValid);
+
+    constexpr std::size_t kPoints = 512u;
+
+    long double squared = 0.0L;
+    double maximumAbsoluteResidual = 0.0;
+
+    // MATCH removes one broadband level offset before designing the EQ.
+    long double offsetSum = 0.0L;
+
+    for (std::size_t i = 0;
+         i < kPoints;
+         ++i) {
+
+        offsetSum +=
+            reference.meanDb[i] -
+            target.meanDb[i];
+    }
+
+    const double levelOffsetDb =
+        static_cast<double>(
+            offsetSum /
+            static_cast<long double>(
+                kPoints));
+
+    const double logMinimum =
+        std::log(
+            ToneMatchAnalyzer::kCurveMinimumHz);
+
+    const double logMaximum =
+        std::log(
+            std::min(
+                ToneMatchAnalyzer::kCurveMaximumHz,
+                reference.sampleRate * 0.45));
+
+    for (std::size_t i = 0;
+         i < kPoints;
+         ++i) {
+
+        const double position =
+            static_cast<double>(i) /
+            static_cast<double>(
+                kPoints - 1u);
+
+        const double frequency =
+            std::exp(
+                logMinimum +
+                (logMaximum -
+                 logMinimum) *
+                    position);
+
+        const double desired =
+            std::clamp(
+                (reference.meanDb[i] -
+                 target.meanDb[i]) -
+                    levelOffsetDb,
+                -24.0,
+                24.0);
+
+        const double actual =
+            responseDb(
+                profile,
+                reference.sampleRate,
+                frequency);
+
+        const double residual =
+            desired - actual;
+
+        squared +=
+            static_cast<long double>(
+                residual * residual);
+
+        maximumAbsoluteResidual =
+            std::max(
+                maximumAbsoluteResidual,
+                std::abs(residual));
+    }
+
+    const double rmsResidual =
+        std::sqrt(
+            static_cast<double>(
+                squared /
+                static_cast<long double>(
+                    kPoints)));
+
+    std::cout
+        << "FIR CURVE residual: rms="
+        << rmsResidual
+        << " dB, max="
+        << maximumAbsoluteResidual
+        << " dB\n";
+
+    BF_REQUIRE(rmsResidual < 0.75);
+    BF_REQUIRE(maximumAbsoluteResidual < 4.0);
+}
+
 void verifyMeasuredAnalyzerSeparatesLevelFromTone() {
     auto quiet =
         std::make_unique<ToneMatchAnalyzer>();
@@ -1110,6 +1229,7 @@ int main() {
     verifyAnalyzerHasNoUpperDbCeiling();
     verifyRealProgramMaterialBeatsPreviousBest();
     verifyGeneralizationSuite();
+    verifyFirTracksMeasuredDifferenceCurve();
     verifyMeasuredAnalyzerSeparatesLevelFromTone();
 
     std::cout
