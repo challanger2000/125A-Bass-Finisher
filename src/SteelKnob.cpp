@@ -386,8 +386,11 @@ void SteelKnob::draw(
             ? ring150_.get()
             : ring100_.get();
 
-    if (ring &&
-        ring->isLoaded()) {
+    const bool ringDrawn =
+        ring &&
+        ring->isLoaded();
+
+    if (ringDrawn) {
 
         const auto logicalSize =
             ring->getWidth();
@@ -403,6 +406,9 @@ void SteelKnob::draw(
             ringRect);
     } else {
 
+        // Fallback only: if the shared ring resource is unavailable, draw
+        // the complete legacy hardware (bezel + skirt). Never draw this
+        // legacy skirt on top of a successfully loaded Finisher ring.
         fillRadialEllipse(
             context,
             bezel,
@@ -439,50 +445,49 @@ void SteelKnob::draw(
         context->drawEllipse(
             bezelGroove,
             VSTGUI::kDrawStroked);
+
+        const VSTGUI::CRect skirt(
+            center.x - radius - 4.0,
+            center.y - radius - 4.0,
+            center.x + radius + 4.0,
+            center.y + radius + 4.0);
+
+        fillRadialEllipse(
+            context,
+            skirt,
+            {172, 178, 188, 255},
+            {31, 35, 42, 255},
+            {
+                -radius * 0.28,
+                -radius * 0.31
+            });
+
+        context->setFrameColor(
+            {4, 5, 7, 255});
+
+        context->setLineWidth(
+            hero ? 1.6 : 1.2);
+
+        context->drawEllipse(
+            skirt,
+            VSTGUI::kDrawStroked);
+
+        auto skirtInner =
+            skirt;
+
+        skirtInner.inset(
+            4.0,
+            4.0);
+
+        context->setFrameColor(
+            {230, 233, 239, 48});
+
+        context->setLineWidth(1.0);
+
+        context->drawEllipse(
+            skirtInner,
+            VSTGUI::kDrawStroked);
     }
-
-    // Machined steel skirt.
-    const VSTGUI::CRect skirt(
-        center.x - radius - 4.0,
-        center.y - radius - 4.0,
-        center.x + radius + 4.0,
-        center.y + radius + 4.0);
-
-    fillRadialEllipse(
-        context,
-        skirt,
-        {172, 178, 188, 255},
-        {31, 35, 42, 255},
-        {
-            -radius * 0.28,
-            -radius * 0.31
-        });
-
-    context->setFrameColor(
-        {4, 5, 7, 255});
-
-    context->setLineWidth(
-        hero ? 1.6 : 1.2);
-
-    context->drawEllipse(
-        skirt,
-        VSTGUI::kDrawStroked);
-
-    auto skirtInner =
-        skirt;
-
-    skirtInner.inset(
-        4.0,
-        4.0);
-
-    context->setFrameColor(
-        {230, 233, 239, 48});
-
-    context->setLineWidth(1.0);
-
-    context->drawEllipse(
-        skirtInner,
-        VSTGUI::kDrawStroked);
 
     // Deep graphite cap with off-axis highlight.
     const auto capRadius =
