@@ -2,6 +2,7 @@
 #include "ToneMatchDSP.h"
 
 #include <cmath>
+#include <chrono>
 #include <iostream>
 #include <limits>
 
@@ -232,7 +233,77 @@ void verifySanitization() {
 
 }
 
+
+void verifyFirRealtimeBudget() {
+    ToneMatchProfile profile {};
+    profile.valid = true;
+    profile.firValid = true;
+    profile.firTaps.fill(0.0);
+
+    // Dense non-zero kernel prevents the optimizer from turning this into
+    // a trivial sparse/identity case.
+    for (std::size_t i = 0;
+         i < profile.firTaps.size();
+         ++i) {
+
+        profile.firTaps[i] =
+            0.00001 *
+            std::sin(
+                0.013 *
+                static_cast<double>(i + 1u));
+    }
+
+    profile.firTaps[0] += 1.0;
+
+    ToneMatchDSP dsp;
+    dsp.prepare(48000.0);
+    dsp.setProfile(profile);
+    dsp.setAmount(1.0);
+    dsp.reset();
+
+    constexpr std::size_t kFrames = 48000u;
+    double left = 0.1;
+    double right = -0.1;
+
+    const auto begin =
+        std::chrono::steady_clock::now();
+
+    for (std::size_t i = 0;
+         i < kFrames;
+         ++i) {
+
+        left += 1.0e-12;
+        right -= 1.0e-12;
+        dsp.processFrame(left, right);
+    }
+
+    const auto end =
+        std::chrono::steady_clock::now();
+
+    const double seconds =
+        std::chrono::duration<double>(
+            end - begin).count();
+
+    std::cout
+        << "FIR realtime benchmark: taps="
+        << kToneMatchFirTapCount
+        << ", 1s stereo processed in "
+        << seconds
+        << " s, realtime load="
+        << (100.0 * seconds)
+        << "% of one core\n";
+
+    BF_REQUIRE(std::isfinite(left));
+    BF_REQUIRE(std::isfinite(right));
+
+    // A release build must have meaningful safety margin for the rest of the
+    // plugin and host. CI timing is noisy, so only reject catastrophically
+    // non-realtime direct convolution here.
+    BF_REQUIRE(seconds < 0.50);
+}
+
 int main() {
+    verifyFirRealtimeBudget();
     verifyZeroExact();
     verifyAmountLawAndRates();
     verifyBassContextDoesNotWeakenMatch();
