@@ -1499,39 +1499,17 @@ ToneMatchAnalyzer::makeProfile(
     profile.valid = true;
     profile.firValid = true;
 
-    // Minimum-phase energy is front-loaded. Keep a production-friendly
-    // 2048-tap causal kernel and taper only the final 25% to suppress
-    // truncation ripple without blurring the measured target curve.
+    // Preserve the minimum-phase kernel literally for the first 2048 taps.
+    // The former final-quarter taper is intentionally omitted here because
+    // FIR-vs-target QA measures whether that window itself bends the desired
+    // magnitude response.
     for (std::size_t i = 0;
          i < profile.firTaps.size();
          ++i) {
 
-        double tap =
+        const double tap =
             minimumPhaseCepstrum[i].
                 real();
-
-        const std::size_t taperStart =
-            (profile.firTaps.size() *
-             3u) /
-            4u;
-
-        if (i >= taperStart) {
-            const double x =
-                static_cast<double>(
-                    i - taperStart) /
-                static_cast<double>(
-                    profile.firTaps.size() -
-                    taperStart - 1u);
-
-            const double window =
-                0.5 *
-                (1.0 +
-                 std::cos(
-                     3.14159265358979323846 *
-                     x));
-
-            tap *= window;
-        }
 
         profile.firTaps[i] =
             std::isfinite(tap)
