@@ -4,7 +4,6 @@
 #include "vstgui/lib/cdrawcontext.h"
 #include "vstgui/lib/cgradient.h"
 #include "vstgui/lib/cgraphicspath.h"
-#include "vstgui/lib/cgraphicstransform.h"
 
 #include <algorithm>
 #include <cmath>
@@ -33,109 +32,71 @@ constexpr double kPi =
     3.14159265358979323846;
 
 // The exact shared master has transparent padding around the visible metal.
-// Keep that optical coverage as part of the asset contract and scale from the
-// computed bezel circle, never from a hand-tuned x/y offset.
 constexpr double kFinisherRingVisibleDiameterFraction =
     1682.0 / 2048.0;
 
-VSTGUI::SharedPointer<VSTGUI::CBitmap>
-makeFinisherRingBitmap(
-    const char* baseName,
-    const char* zoom150Name) {
+struct RingAssetNames {
+    const char* zoom100;
+    const char* zoom150;
+};
 
-    auto bitmap =
-        VSTGUI::makeOwned<VSTGUI::CBitmap>(
-            VSTGUI::CResourceDescription(baseName));
+RingAssetNames ringAssetNames(
+    double minDim,
+    bool hero) {
 
-    auto zoom150 =
-        VSTGUI::makeOwned<VSTGUI::CBitmap>(
-            VSTGUI::CResourceDescription(zoom150Name));
-
-    if (bitmap &&
-        bitmap->isLoaded() &&
-        zoom150 &&
-        zoom150->isLoaded()) {
-
-        auto hiDpi =
-            zoom150->getPlatformBitmap();
-
-        if (hiDpi) {
-            hiDpi->setScaleFactor(1.5);
-            bitmap->addBitmap(hiDpi);
-        }
+    if (hero || minDim >= 145.0) {
+        return {
+            "125A_FinisherRing_H_128px_100pct.png",
+            "125A_FinisherRing_H_192px_150pct.png"
+        };
     }
 
-    return bitmap;
-}
-
-VSTGUI::CBitmap* finisherRingForSize(
-    double minDim) {
-
-    static auto small =
-        makeFinisherRingBitmap(
-            "125A_FinisherRing_S_64px_100pct.png",
-            "125A_FinisherRing_S_96px_150pct.png");
-
-    static auto medium =
-        makeFinisherRingBitmap(
+    if (minDim >= 96.0) {
+        return {
             "125A_FinisherRing_M_96px_100pct.png",
-            "125A_FinisherRing_M_144px_150pct.png");
+            "125A_FinisherRing_M_144px_150pct.png"
+        };
+    }
 
-    static auto hero =
-        makeFinisherRingBitmap(
-            "125A_FinisherRing_H_128px_100pct.png",
-            "125A_FinisherRing_H_192px_150pct.png");
-
-    if (minDim >= 145.0)
-        return hero.get();
-
-    if (minDim >= 96.0)
-        return medium.get();
-
-    return small.get();
+    return {
+        "125A_FinisherRing_S_64px_100pct.png",
+        "125A_FinisherRing_S_96px_150pct.png"
+    };
 }
 
-bool drawFinisherRing(
-    VSTGUI::CDrawContext* context,
-    const VSTGUI::CPoint& center,
-    double bezelRadius,
-    double minDim) {
+VSTGUI::SharedPointer<VSTGUI::CBitmap>
+loadRingBitmap(
+    const char* resourceName,
+    double logicalCanvasSize) {
 
-    auto* bitmap =
-        finisherRingForSize(minDim);
+    auto bitmap =
+        VSTGUI::owned(
+            new VSTGUI::CBitmap(
+                VSTGUI::CResourceDescription(
+                    resourceName)));
 
     if (!bitmap ||
         !bitmap->isLoaded())
-        return false;
+        return nullptr;
 
-    const auto logicalSize =
-        bitmap->getWidth();
+    auto platform =
+        bitmap->getPlatformBitmap();
 
-    if (logicalSize <= 0.0)
-        return false;
+    if (!platform ||
+        logicalCanvasSize <= 0.0)
+        return nullptr;
 
-    const auto scale =
-        (bezelRadius * 2.0) /
-        (logicalSize *
-         kFinisherRingVisibleDiameterFraction);
+    const auto pixelWidth =
+        platform->getSize().x;
 
-    const VSTGUI::CRect bitmapRect(
-        center.x - logicalSize * 0.5,
-        center.y - logicalSize * 0.5,
-        center.x + logicalSize * 0.5,
-        center.y + logicalSize * 0.5);
+    if (pixelWidth <= 0.0)
+        return nullptr;
 
-    VSTGUI::CGraphicsTransform transform;
-    transform
-        .translate(-center.x, -center.y)
-        .scale(scale, scale)
-        .translate(center.x, center.y);
+    platform->setScaleFactor(
+        pixelWidth /
+        logicalCanvasSize);
 
-    context->pushTransform(transform);
-    bitmap->draw(context, bitmapRect);
-    context->popTransform();
-
-    return true;
+    return bitmap;
 }
 
 void fillRadialEllipse(
@@ -203,6 +164,41 @@ SteelKnob::SteelKnob(
 
     setWantsFocus(true);
     setTransparency(true);
+
+    const auto minDim =
+        std::min(
+            size.getWidth(),
+            size.getHeight());
+
+    const bool hero =
+        style_ == Style::Hero;
+
+    const auto radius =
+        minDim *
+        (hero ? 0.365 : 0.355);
+
+    const auto bezelRadius =
+        radius +
+        (hero ? 8.0 : 6.0);
+
+    const auto logicalCanvasSize =
+        (bezelRadius * 2.0) /
+        kFinisherRingVisibleDiameterFraction;
+
+    const auto names =
+        ringAssetNames(
+            minDim,
+            hero);
+
+    ring100_ =
+        loadRingBitmap(
+            names.zoom100,
+            logicalCanvasSize);
+
+    ring150_ =
+        loadRingBitmap(
+            names.zoom150,
+            logicalCanvasSize);
 }
 
 void SteelKnob::draw(
@@ -368,11 +364,44 @@ void SteelKnob::draw(
         center.x + bezelRadius,
         center.y + bezelRadius);
 
-    if (!drawFinisherRing(
+    // Choose the 100% or 150% raster explicitly from the actual draw
+    // scale. Do not rely on VSTGUI's automatic multi-resolution bitmap
+    // selection in these plugins.
+    double effectiveScale =
+        context->getScaleFactor();
+
+    const auto transform =
+        context->getCurrentTransform();
+
+    if (transform.m11 > 0.0 &&
+        std::abs(transform.m12) < 1.0e-9 &&
+        std::abs(transform.m21) < 1.0e-9) {
+
+        effectiveScale *=
+            transform.m11;
+    }
+
+    auto* ring =
+        effectiveScale >= 1.25
+            ? ring150_.get()
+            : ring100_.get();
+
+    if (ring &&
+        ring->isLoaded()) {
+
+        const auto logicalSize =
+            ring->getWidth();
+
+        const VSTGUI::CRect ringRect(
+            center.x - logicalSize * 0.5,
+            center.y - logicalSize * 0.5,
+            center.x + logicalSize * 0.5,
+            center.y + logicalSize * 0.5);
+
+        ring->draw(
             context,
-            center,
-            bezelRadius,
-            minDim)) {
+            ringRect);
+    } else {
 
         fillRadialEllipse(
             context,
