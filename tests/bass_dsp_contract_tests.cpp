@@ -1087,12 +1087,13 @@ void verifySampleRatesExtremesAndStereoLink() {
         }
     }
 
-    // FINAL gain reduction is linked between channels. A hot left channel
-    // must not alter stereo balance by being limited independently.
+    // FINAL gain reduction is linked between channels whenever a production
+    // stage is active. A hot left channel must not alter stereo balance by
+    // being limited independently.
     {
         MetalFinisherDSP dsp;
         dsp.prepare(kFs);
-        dsp.setFinish(0.0);
+        dsp.setFinish(1.0);
         dsp.setMass(0.0);
         dsp.setLowCut(0.0);
         dsp.setToneMatchAmount(0.0);
