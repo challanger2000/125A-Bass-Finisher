@@ -332,7 +332,8 @@ tresult PLUGIN_API Controller::initialize(
 }
 
 tresult PLUGIN_API Controller::terminate() {
-    stopToneMatchBuildWorker();
+    invalidateToneMatchBuild();
+    joinToneMatchBuildWorker();
     toneMatchBuildTimer_ = nullptr;
     return EditController::terminate();
 }
@@ -911,7 +912,7 @@ tresult PLUGIN_API
 Controller::setComponentState(
     IBStream* state) {
 
-    stopToneMatchBuildWorker();
+    invalidateToneMatchBuild();
 
     if (!state)
         return kInvalidArgument;
@@ -1299,7 +1300,7 @@ bool Controller::saveToneMatchReferenceProfile(
 }
 
 void Controller::clearToneMatchTarget() {
-    stopToneMatchBuildWorker();
+    invalidateToneMatchBuild();
     toneMatchTargetSpectrum_ = {};
     toneMatchTargetReady_ = false;
     activeToneMatchProfile_ = {};
@@ -1317,7 +1318,7 @@ void Controller::clearToneMatchTarget() {
 }
 
 void Controller::clearToneMatchReference() {
-    stopToneMatchBuildWorker();
+    invalidateToneMatchBuild();
     toneMatchReferenceSpectrum_ = {};
     toneMatchReferenceReady_ = false;
     activeToneMatchProfile_ = {};
@@ -1410,23 +1411,102 @@ void Controller::tryBuildToneMatchProfile() {
         return;
     }
 
-    // Never run the expensive matcher on the host/UI thread. The old
-    // synchronous path froze Studio One for minutes with the 64-band solver.
-    stopToneMatchBuildWorker();
-
-    const auto reference =
-        toneMatchReferenceSpectrum_;
-
-    const auto target =
-        toneMatchTargetSpectrum_;
+    const auto generation =
+        toneMatchBuildGeneration_.fetch_add(
+            1,
+            std::memory_order_acq_rel) + 1;
 
     {
         std::lock_guard<std::mutex> lock(
             toneMatchBuildMutex_);
 
+        queuedToneMatchReference_ =
+            toneMatchReferenceSpectrum_;
+
+        queuedToneMatchTarget_ =
+            toneMatchTargetSpectrum_;
+
+        queuedToneMatchGeneration_ =
+            generation;
+
+        toneMatchBuildQueued_ =
+            true;
+    }
+
+    toneMatchStatus_ =
+        ToneMatchStatus::Matching;
+
+    toneMatchLastError_.clear();
+    updateToneMatchGui();
+
+    launchQueuedToneMatchBuild();
+
+    if (!toneMatchBuildTimer_) {
+        toneMatchBuildTimer_ =
+            VSTGUI::makeOwned<
+                VSTGUI::CVSTGUITimer>(
+                    [this](
+                        VSTGUI::CVSTGUITimer*) {
+                        pollToneMatchBuild();
+                    },
+                    50);
+    }
+}
+
+void Controller::invalidateToneMatchBuild() noexcept {
+    toneMatchBuildGeneration_.fetch_add(
+        1,
+        std::memory_order_acq_rel);
+
+    std::lock_guard<std::mutex> lock(
+        toneMatchBuildMutex_);
+
+    toneMatchBuildQueued_ = false;
+    pendingToneMatchProfile_ = {};
+    pendingToneMatchProfileValid_ = false;
+    pendingToneMatchProfileGeneration_ = 0;
+}
+
+void Controller::joinToneMatchBuildWorker() noexcept {
+    if (toneMatchBuildWorker_.joinable())
+        toneMatchBuildWorker_.join();
+
+    toneMatchBuildRunning_.store(
+        false,
+        std::memory_order_release);
+}
+
+void Controller::launchQueuedToneMatchBuild() {
+    if (toneMatchBuildRunning_.load(
+            std::memory_order_acquire)) {
+        return;
+    }
+
+    // A finished worker may still be joinable until the UI timer observes
+    // completion. Joining it here is non-blocking because Running is already
+    // false and the worker has reached its completion path.
+    if (toneMatchBuildWorker_.joinable())
+        toneMatchBuildWorker_.join();
+
+    dsp::ToneMatchSpectrumSnapshot reference {};
+    dsp::ToneMatchSpectrumSnapshot target {};
+    std::uint64_t generation = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(
+            toneMatchBuildMutex_);
+
+        if (!toneMatchBuildQueued_)
+            return;
+
+        reference = queuedToneMatchReference_;
+        target = queuedToneMatchTarget_;
+        generation = queuedToneMatchGeneration_;
+        toneMatchBuildQueued_ = false;
+
         pendingToneMatchProfile_ = {};
-        pendingToneMatchProfileValid_ =
-            false;
+        pendingToneMatchProfileValid_ = false;
+        pendingToneMatchProfileGeneration_ = 0;
     }
 
     toneMatchBuildDone_.store(
@@ -1437,24 +1517,29 @@ void Controller::tryBuildToneMatchProfile() {
         true,
         std::memory_order_release);
 
-    toneMatchStatus_ =
-        ToneMatchStatus::Matching;
-
-    toneMatchLastError_.clear();
-    updateToneMatchGui();
-
     try {
         toneMatchBuildWorker_ =
             std::thread(
                 [this,
                  reference,
-                 target]() noexcept {
+                 target,
+                 generation]() noexcept {
 
-                    const auto profile =
-                        dsp::ToneMatchAnalyzer::
-                            makeProfile(
-                                reference,
-                                target);
+                    dsp::ToneMatchProfile profile {};
+                    bool valid = false;
+
+                    try {
+                        profile =
+                            dsp::ToneMatchAnalyzer::
+                                makeProfile(
+                                    reference,
+                                    target);
+
+                        valid = profile.valid;
+                    } catch (...) {
+                        profile = {};
+                        valid = false;
+                    }
 
                     {
                         std::lock_guard<std::mutex>
@@ -1465,7 +1550,10 @@ void Controller::tryBuildToneMatchProfile() {
                             profile;
 
                         pendingToneMatchProfileValid_ =
-                            profile.valid;
+                            valid;
+
+                        pendingToneMatchProfileGeneration_ =
+                            generation;
                     }
 
                     toneMatchBuildRunning_.store(
@@ -1488,28 +1576,7 @@ void Controller::tryBuildToneMatchProfile() {
             "Cannot start Tone Match calculation";
 
         updateToneMatchGui();
-        return;
     }
-
-    if (!toneMatchBuildTimer_) {
-        toneMatchBuildTimer_ =
-            VSTGUI::makeOwned<
-                VSTGUI::CVSTGUITimer>(
-                    [this](
-                        VSTGUI::CVSTGUITimer*) {
-                        pollToneMatchBuild();
-                    },
-                    50);
-    }
-}
-
-void Controller::stopToneMatchBuildWorker() noexcept {
-    if (toneMatchBuildWorker_.joinable())
-        toneMatchBuildWorker_.join();
-
-    toneMatchBuildRunning_.store(
-        false,
-        std::memory_order_release);
 }
 
 void Controller::pollToneMatchBuild() {
@@ -1524,6 +1591,8 @@ void Controller::pollToneMatchBuild() {
 
     dsp::ToneMatchProfile profile {};
     bool valid = false;
+    std::uint64_t completedGeneration = 0;
+    bool queued = false;
 
     {
         std::lock_guard<std::mutex> lock(
@@ -1534,6 +1603,30 @@ void Controller::pollToneMatchBuild() {
 
         valid =
             pendingToneMatchProfileValid_;
+
+        completedGeneration =
+            pendingToneMatchProfileGeneration_;
+
+        queued =
+            toneMatchBuildQueued_;
+    }
+
+    const auto currentGeneration =
+        toneMatchBuildGeneration_.load(
+            std::memory_order_acquire);
+
+    if (completedGeneration !=
+        currentGeneration) {
+
+        if (queued) {
+            toneMatchStatus_ =
+                ToneMatchStatus::Matching;
+
+            launchQueuedToneMatchBuild();
+        }
+
+        updateToneMatchGui();
+        return;
     }
 
     if (!valid) {
