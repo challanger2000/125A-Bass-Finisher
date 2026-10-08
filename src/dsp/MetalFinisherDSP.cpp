@@ -1025,11 +1025,22 @@ void MetalFinisherDSP::processFrame(
             mass_;
     }
 
-    // FINAL is always available as a transparent peak guard. Signals below
-    // its knee are untouched; only near-full-scale peaks are managed.
-    applyFinal(
-        processedLeft,
-        processedRight);
+    // FINAL belongs to the active production path. With every user-facing
+    // processing amount neutral, the plugin must remain truly transparent,
+    // including near-full-scale peaks.
+    const bool productionPathActive =
+        finish_ > 0.0 ||
+        mass_ > 0.0 ||
+        lowCutEnabled(lowCutTarget_) ||
+        toneMatchAmount_ > 0.0;
+
+    if (productionPathActive) {
+        applyFinal(
+            processedLeft,
+            processedRight);
+    } else {
+        finalGain_ = 1.0;
+    }
 
     // Bass Finisher has no built-in SPACE stage. FINAL feeds OUT directly.
     left = processedLeft;
