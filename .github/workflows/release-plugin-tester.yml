@@ -7,6 +7,7 @@ on:
       - v1.0.0-engineering
     paths:
       - ".github/workflows/release-plugin-tester.yml"
+      - "RELEASE-AUDIT.md"
 
 jobs:
   release-qa:
