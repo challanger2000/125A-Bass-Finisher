@@ -157,3 +157,9 @@ target_link_libraries(BassFinisherControllerContractTests PRIVATE
 target_compile_features(BassFinisherControllerContractTests PRIVATE cxx_std_17)
 hggf_enable_project_warnings(BassFinisherControllerContractTests)
 add_test(NAME BassFinisherControllerContractTests COMMAND BassFinisherControllerContractTests)
+
+
+if(MSVC)
+    target_link_options(BassFinisherStateV1Tests PRIVATE /STACK:8388608)
+    target_link_options(BassFinisherProcessorContractTests PRIVATE /STACK:8388608)
+endif()
