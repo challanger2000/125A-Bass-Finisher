@@ -1033,6 +1033,7 @@ void verifyFirTracksMeasuredDifferenceCurve() {
 
     long double squared = 0.0L;
     double maximumAbsoluteResidual = 0.0;
+    double maximumResidualFrequencyHz = 0.0;
 
     // Reproduce the production design target exactly: same 256-point
     // broadband offset, same log-frequency interpolation, same spike guard.
@@ -1154,6 +1155,13 @@ void verifyFirTracksMeasuredDifferenceCurve() {
                  logMinimum) *
                     position);
 
+        constexpr double kMinimumMatchHz = 30.0;
+        constexpr double kMaximumMatchHz = 12000.0;
+        const double maximumMatchHz =
+            std::min(
+                kMaximumMatchHz,
+                reference.sampleRate * 0.45);
+
         const auto differenceAt =
             [&](double f) {
                 return
@@ -1162,44 +1170,77 @@ void verifyFirTracksMeasuredDifferenceCurve() {
                     levelOffsetDb;
             };
 
-        const double center =
-            differenceAt(frequency);
+        double desired = 0.0;
 
-        const double lower =
-            differenceAt(
-                std::max(
-                    ToneMatchAnalyzer::kCurveMinimumHz,
-                    frequency / 1.025));
+        if (frequency >= kMinimumMatchHz &&
+            frequency <= maximumMatchHz) {
 
-        const double upper =
-            differenceAt(
-                std::min(
+            const double center =
+                differenceAt(frequency);
+
+            const double lower =
+                differenceAt(
+                    std::max(
+                        kMinimumMatchHz,
+                        frequency / 1.025));
+
+            const double upper =
+                differenceAt(
                     std::min(
-                        ToneMatchAnalyzer::kCurveMaximumHz,
-                        reference.sampleRate * 0.45),
-                    frequency * 1.025));
+                        maximumMatchHz,
+                        frequency * 1.025));
 
-        const double neighbourMean =
-            0.5 * (lower + upper);
+            const double neighbourMean =
+                0.5 * (lower + upper);
 
-        const double localSpread =
-            std::abs(lower - upper);
+            const double localSpread =
+                std::abs(lower - upper);
 
-        const bool isolatedSpike =
-            std::abs(
-                center -
-                neighbourMean) >
-            std::max(
-                3.0,
-                2.5 * localSpread);
+            const bool isolatedSpike =
+                std::abs(
+                    center -
+                    neighbourMean) >
+                std::max(
+                    3.0,
+                    2.5 * localSpread);
 
-        const double desired =
-            std::clamp(
-                isolatedSpike
-                    ? neighbourMean
-                    : center,
-                -24.0,
-                24.0);
+            desired =
+                std::clamp(
+                    isolatedSpike
+                        ? neighbourMean
+                        : center,
+                    -24.0,
+                    24.0);
+
+        } else if (frequency < kMinimumMatchHz) {
+
+            desired =
+                std::clamp(
+                    differenceAt(kMinimumMatchHz),
+                    -24.0,
+                    24.0);
+
+        } else {
+
+            const double nyquist =
+                reference.sampleRate * 0.5;
+
+            const double edge =
+                std::clamp(
+                    differenceAt(maximumMatchHz),
+                    -24.0,
+                    24.0);
+
+            const double t =
+                std::clamp(
+                    (frequency - maximumMatchHz) /
+                    (nyquist - maximumMatchHz),
+                    0.0,
+                    1.0);
+
+            desired =
+                edge * (1.0 - t);
+        }
 
         const double actual =
             responseDb(
@@ -1214,10 +1255,18 @@ void verifyFirTracksMeasuredDifferenceCurve() {
             static_cast<long double>(
                 residual * residual);
 
-        maximumAbsoluteResidual =
-            std::max(
-                maximumAbsoluteResidual,
-                std::abs(residual));
+        const double absoluteResidual =
+            std::abs(residual);
+
+        if (absoluteResidual >
+            maximumAbsoluteResidual) {
+
+            maximumAbsoluteResidual =
+                absoluteResidual;
+
+            maximumResidualFrequencyHz =
+                frequency;
+        }
     }
 
     const double rmsResidual =
@@ -1232,7 +1281,9 @@ void verifyFirTracksMeasuredDifferenceCurve() {
         << rmsResidual
         << " dB, max="
         << maximumAbsoluteResidual
-        << " dB\n";
+        << " dB @ "
+        << maximumResidualFrequencyHz
+        << " Hz\n";
 
     BF_REQUIRE(rmsResidual < 0.75);
     BF_REQUIRE(maximumAbsoluteResidual < 4.0);
