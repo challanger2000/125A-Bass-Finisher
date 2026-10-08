@@ -9,6 +9,7 @@
 #include "vstgui/plugin-bindings/vst3editor.h"
 
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -127,7 +128,9 @@ private:
     Steinberg::tresult sendToneMatchReferenceSpectrum(
         const dsp::ToneMatchSpectrumSnapshot& snapshot);
     void tryBuildToneMatchProfile();
-    void stopToneMatchBuildWorker() noexcept;
+    void invalidateToneMatchBuild() noexcept;
+    void joinToneMatchBuildWorker() noexcept;
+    void launchQueuedToneMatchBuild();
     void pollToneMatchBuild();
     void updateToneMatchGui();
     void chooseToneMatchReference(
@@ -149,9 +152,15 @@ private:
     std::thread toneMatchBuildWorker_ {};
     std::atomic<bool> toneMatchBuildDone_ {false};
     std::atomic<bool> toneMatchBuildRunning_ {false};
+    std::atomic<std::uint64_t> toneMatchBuildGeneration_ {0};
     std::mutex toneMatchBuildMutex_ {};
     dsp::ToneMatchProfile pendingToneMatchProfile_ {};
     bool pendingToneMatchProfileValid_ {false};
+    std::uint64_t pendingToneMatchProfileGeneration_ {0};
+    dsp::ToneMatchSpectrumSnapshot queuedToneMatchReference_ {};
+    dsp::ToneMatchSpectrumSnapshot queuedToneMatchTarget_ {};
+    std::uint64_t queuedToneMatchGeneration_ {0};
+    bool toneMatchBuildQueued_ {false};
     VSTGUI::SharedPointer<VSTGUI::CVSTGUITimer> toneMatchBuildTimer_ {};
 
     VSTGUI::VST3Editor* editor_ {nullptr};
