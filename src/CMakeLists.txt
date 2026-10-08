@@ -91,6 +91,12 @@ smtg_target_add_plugin_resources(
     RESOURCES
         ../resource/HighGainGuitarFinisher.uidesc
         ../resource/125A_Logo_Master_FINAL.svg
+        ../resource/125A_FinisherRing_S_64px_100pct.png
+        ../resource/125A_FinisherRing_S_96px_150pct.png
+        ../resource/125A_FinisherRing_M_96px_100pct.png
+        ../resource/125A_FinisherRing_M_144px_150pct.png
+        ../resource/125A_FinisherRing_H_128px_100pct.png
+        ../resource/125A_FinisherRing_H_192px_150pct.png
 )
 
 smtg_target_configure_version_file(BassFinisher)

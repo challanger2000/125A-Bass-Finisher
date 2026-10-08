@@ -1,8 +1,10 @@
 #include "SteelKnob.h"
 
+#include "vstgui/lib/cbitmap.h"
 #include "vstgui/lib/cdrawcontext.h"
 #include "vstgui/lib/cgradient.h"
 #include "vstgui/lib/cgraphicspath.h"
+#include "vstgui/lib/cgraphicstransform.h"
 
 #include <algorithm>
 #include <cmath>
@@ -29,6 +31,112 @@ constexpr VSTGUI::CColor kTick {
 
 constexpr double kPi =
     3.14159265358979323846;
+
+// The exact shared master has transparent padding around the visible metal.
+// Keep that optical coverage as part of the asset contract and scale from the
+// computed bezel circle, never from a hand-tuned x/y offset.
+constexpr double kFinisherRingVisibleDiameterFraction =
+    1682.0 / 2048.0;
+
+VSTGUI::SharedPointer<VSTGUI::CBitmap>
+makeFinisherRingBitmap(
+    const char* baseName,
+    const char* zoom150Name) {
+
+    auto bitmap =
+        VSTGUI::makeOwned<VSTGUI::CBitmap>(
+            VSTGUI::CResourceDescription(baseName));
+
+    auto zoom150 =
+        VSTGUI::makeOwned<VSTGUI::CBitmap>(
+            VSTGUI::CResourceDescription(zoom150Name));
+
+    if (bitmap &&
+        bitmap->isLoaded() &&
+        zoom150 &&
+        zoom150->isLoaded()) {
+
+        auto hiDpi =
+            zoom150->getPlatformBitmap();
+
+        if (hiDpi) {
+            hiDpi->setScaleFactor(1.5);
+            bitmap->addBitmap(hiDpi);
+        }
+    }
+
+    return bitmap;
+}
+
+VSTGUI::CBitmap* finisherRingForSize(
+    double minDim) {
+
+    static auto small =
+        makeFinisherRingBitmap(
+            "125A_FinisherRing_S_64px_100pct.png",
+            "125A_FinisherRing_S_96px_150pct.png");
+
+    static auto medium =
+        makeFinisherRingBitmap(
+            "125A_FinisherRing_M_96px_100pct.png",
+            "125A_FinisherRing_M_144px_150pct.png");
+
+    static auto hero =
+        makeFinisherRingBitmap(
+            "125A_FinisherRing_H_128px_100pct.png",
+            "125A_FinisherRing_H_192px_150pct.png");
+
+    if (minDim >= 145.0)
+        return hero.get();
+
+    if (minDim >= 96.0)
+        return medium.get();
+
+    return small.get();
+}
+
+bool drawFinisherRing(
+    VSTGUI::CDrawContext* context,
+    const VSTGUI::CPoint& center,
+    double bezelRadius,
+    double minDim) {
+
+    auto* bitmap =
+        finisherRingForSize(minDim);
+
+    if (!bitmap ||
+        !bitmap->isLoaded())
+        return false;
+
+    const auto logicalSize =
+        bitmap->getWidth();
+
+    if (logicalSize <= 0.0)
+        return false;
+
+    const auto scale =
+        (bezelRadius * 2.0) /
+        (logicalSize *
+         kFinisherRingVisibleDiameterFraction);
+
+    const VSTGUI::CRect bitmapRect(
+        center.x - logicalSize * 0.5,
+        center.y - logicalSize * 0.5,
+        center.x + logicalSize * 0.5,
+        center.y + logicalSize * 0.5);
+
+    VSTGUI::CGraphicsTransform transform;
+    transform
+        .translate(-center.x, -center.y)
+        .scale(scale, scale)
+        .translate(center.x, center.y);
+
+    context->pushTransform(transform);
+    bitmap->draw(context, bitmapRect);
+    context->popTransform();
+
+    return true;
+}
 
 void fillRadialEllipse(
     VSTGUI::CDrawContext* context,
@@ -246,9 +354,10 @@ void SteelKnob::draw(
             135.0 +
             normalized * 270.0));
 
-    // Concentric mounting bezel. It is derived from the exact same center
-    // and radius as the knob body, so the hardware ring stays perfectly
-    // circular at every supported view size.
+    // Shared 125A Finisher gunmetal bezel. The asset replaces the previous
+    // procedural outer ring but keeps the exact computed center/radius. If a
+    // resource ever fails to load, retain the procedural bezel as a safe UI
+    // fallback rather than leaving the control visually incomplete.
     const auto bezelRadius =
         radius +
         (hero ? 8.0 : 6.0);
@@ -259,42 +368,49 @@ void SteelKnob::draw(
         center.x + bezelRadius,
         center.y + bezelRadius);
 
-    fillRadialEllipse(
-        context,
-        bezel,
-        {205, 209, 216, 255},
-        {20, 23, 28, 255},
-        {
-            -bezelRadius * 0.24,
-            -bezelRadius * 0.27
-        });
+    if (!drawFinisherRing(
+            context,
+            center,
+            bezelRadius,
+            minDim)) {
 
-    context->setFrameColor(
-        {4, 5, 7, 255});
+        fillRadialEllipse(
+            context,
+            bezel,
+            {205, 209, 216, 255},
+            {20, 23, 28, 255},
+            {
+                -bezelRadius * 0.24,
+                -bezelRadius * 0.27
+            });
 
-    context->setLineWidth(
-        hero ? 2.0 : 1.5);
+        context->setFrameColor(
+            {4, 5, 7, 255});
 
-    context->drawEllipse(
-        bezel,
-        VSTGUI::kDrawStroked);
+        context->setLineWidth(
+            hero ? 2.0 : 1.5);
 
-    auto bezelGroove =
-        bezel;
+        context->drawEllipse(
+            bezel,
+            VSTGUI::kDrawStroked);
 
-    bezelGroove.inset(
-        hero ? 3.5 : 3.0,
-        hero ? 3.5 : 3.0);
+        auto bezelGroove =
+            bezel;
 
-    context->setFrameColor(
-        {5, 7, 10, 220});
+        bezelGroove.inset(
+            hero ? 3.5 : 3.0,
+            hero ? 3.5 : 3.0);
 
-    context->setLineWidth(
-        hero ? 2.2 : 1.7);
+        context->setFrameColor(
+            {5, 7, 10, 220});
 
-    context->drawEllipse(
-        bezelGroove,
-        VSTGUI::kDrawStroked);
+        context->setLineWidth(
+            hero ? 2.2 : 1.7);
+
+        context->drawEllipse(
+            bezelGroove,
+            VSTGUI::kDrawStroked);
+    }
 
     // Machined steel skirt.
     const VSTGUI::CRect skirt(
