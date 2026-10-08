@@ -1093,10 +1093,12 @@ void verifySampleRatesExtremesAndStereoLink() {
     {
         MetalFinisherDSP dsp;
         dsp.prepare(kFs);
-        dsp.setFinish(1.0);
+        dsp.setFinish(0.0);
         dsp.setMass(0.0);
         dsp.setLowCut(0.0);
-        dsp.setToneMatchAmount(0.0);
+        // Activate the production path without altering the signal before
+        // FINAL: MATCH amount is non-zero, but no valid profile is loaded.
+        dsp.setToneMatchAmount(1.0);
         dsp.reset();
 
         double l = 1.5;
