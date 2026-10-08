@@ -144,7 +144,8 @@ tresult PLUGIN_API Processor::setProcessing(TBool state) {
         bypassDSPDormant_ = bypassed;
     }
 
-    return AudioEffect::setProcessing(state);
+    AudioEffect::setProcessing(state);
+    return kResultTrue;
 }
 
 ParamValue Processor::currentParameterValue(
