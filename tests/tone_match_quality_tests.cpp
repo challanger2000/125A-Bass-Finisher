@@ -516,7 +516,7 @@ void verifyDistanceImproves() {
     BF_REQUIRE(after < before * 0.08);
 }
 
-void verifyNarrowDifferenceIsMatchedLiterally() {
+void verifyNarrowSpikeIsRejected() {
     auto target =
         makeTarget(48000.0);
 
@@ -535,15 +535,13 @@ void verifyNarrowDifferenceIsMatchedLiterally() {
             target);
 
     BF_REQUIRE(profile.valid);
-    BF_REQUIRE(profile.firValid);
 
-    // MATCH must no longer reject a measured narrow difference. Any later
-    // resonance control belongs to FINISH, not to the matcher.
+    BF_REQUIRE(profile.firValid);
     BF_REQUIRE(
         responseDb(
             profile,
             48000.0,
-            1000.0) >
+            1000.0) <
         3.0);
 }
 
@@ -903,7 +901,7 @@ void verifyMeasuredAnalyzerSeparatesLevelFromTone() {
 
 int main() {
     verifyDistanceImproves();
-    verifyNarrowDifferenceIsMatchedLiterally();
+    verifyNarrowSpikeIsRejected();
     verifyHighRangeCorrectionIsNotArtificiallyCapped();
     verifySubBoostProtection();
     verifyAbsoluteLevelIsNotTone();
