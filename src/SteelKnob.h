@@ -1,5 +1,6 @@
 #pragma once
 
+#include "vstgui/lib/cbitmap.h"
 #include "vstgui/lib/controls/cknob.h"
 
 #include <cstdint>
@@ -22,6 +23,8 @@ public:
 
 private:
     Style style_ {Style::Small};
+    VSTGUI::SharedPointer<VSTGUI::CBitmap> ring100_;
+    VSTGUI::SharedPointer<VSTGUI::CBitmap> ring150_;
 };
 
 } // namespace HighGainGuitarFinisher
