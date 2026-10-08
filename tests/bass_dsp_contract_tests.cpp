@@ -699,6 +699,36 @@ void verifyAutoInputAndFinalContract() {
         }
     }
 
+    // The exact neutral contract also covers hot near/full-scale material.
+    // FINAL must not become a hidden limiter when all production controls are off.
+    {
+        MetalFinisherDSP dsp;
+        dsp.prepare(kFs);
+        dsp.setFinish(0.0);
+        dsp.setMass(0.0);
+        dsp.setLowCut(0.0);
+        dsp.setToneMatchAmount(0.0);
+        dsp.reset();
+
+        for (int i = 0; i < 4096; ++i) {
+            const double l0 =
+                1.05 *
+                std::sin(
+                    0.011 * i);
+            const double r0 =
+                1.02 *
+                std::cos(
+                    0.013 * i);
+
+            double l = l0;
+            double r = r0;
+            dsp.processFrame(l, r);
+
+            BF_REQUIRE(l == l0);
+            BF_REQUIRE(r == r0);
+        }
+    }
+
     // With production processing active, very hot material must remain finite
     // and FINAL must enforce the linked -0.1 dBFS ceiling.
     {
