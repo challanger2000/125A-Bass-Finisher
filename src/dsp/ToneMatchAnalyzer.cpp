@@ -1326,44 +1326,13 @@ ToneMatchAnalyzer::makeProfile(
                         levelOffsetDb;
                 };
 
-            const double center =
-                differenceAt(
-                    frequency);
-
-            const double lower =
-                differenceAt(
-                    std::max(
-                        kMinimumMatchHz,
-                        frequency / 1.025));
-
-            const double upper =
-                differenceAt(
-                    std::min(
-                        maximumMatchHz,
-                        frequency * 1.025));
-
-            const double neighbourMean =
-                0.5 * (lower + upper);
-
-            const double localSpread =
-                std::abs(lower - upper);
-
-            const bool isolatedSpike =
-                std::abs(
-                    center -
-                    neighbourMean) >
-                std::max(
-                    3.0,
-                    2.5 * localSpread);
-
-            correctionDb =
-                isolatedSpike
-                    ? neighbourMean
-                    : center;
-
+            // MATCH is intentionally literal: apply the measured
+            // Reference - Target curve without aesthetic resonance rejection.
+            // Resonance control belongs to the downstream FINISH stage.
             correctionDb =
                 std::clamp(
-                    correctionDb,
+                    differenceAt(
+                        frequency),
                     -kMaximumCorrectionDb,
                     kMaximumCorrectionDb);
         } else if (
