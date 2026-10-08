@@ -1034,23 +1034,99 @@ void verifyFirTracksMeasuredDifferenceCurve() {
     long double squared = 0.0L;
     double maximumAbsoluteResidual = 0.0;
 
-    // MATCH removes one broadband level offset before designing the EQ.
+    // Reproduce the production design target exactly: same 256-point
+    // broadband offset, same log-frequency interpolation, same spike guard.
+    constexpr std::size_t kOffsetPoints = 256u;
     long double offsetSum = 0.0L;
+    std::size_t offsetCount = 0u;
+
+    const auto sampleCurve =
+        [&](const ToneMatchSpectrumSnapshot& s,
+            double frequency) {
+
+            const double maximumFrequency =
+                std::min(
+                    ToneMatchAnalyzer::kCurveMaximumHz,
+                    s.sampleRate * 0.45);
+
+            const double f =
+                std::clamp(
+                    frequency,
+                    ToneMatchAnalyzer::kCurveMinimumHz,
+                    maximumFrequency);
+
+            const double position =
+                (std::log(f) -
+                 std::log(
+                     ToneMatchAnalyzer::kCurveMinimumHz)) /
+                (std::log(maximumFrequency) -
+                 std::log(
+                     ToneMatchAnalyzer::kCurveMinimumHz));
+
+            const double exactIndex =
+                position *
+                static_cast<double>(
+                    ToneMatchAnalyzer::kCurveBins - 1u);
+
+            const std::size_t i0 =
+                std::min(
+                    static_cast<std::size_t>(
+                        std::floor(exactIndex)),
+                    ToneMatchAnalyzer::kCurveBins - 1u);
+
+            const std::size_t i1 =
+                std::min(
+                    i0 + 1u,
+                    ToneMatchAnalyzer::kCurveBins - 1u);
+
+            const double t =
+                exactIndex -
+                static_cast<double>(i0);
+
+            return
+                s.meanDb[i0] +
+                (s.meanDb[i1] -
+                 s.meanDb[i0]) * t;
+        };
 
     for (std::size_t i = 0;
-         i < kPoints;
+         i < kOffsetPoints;
          ++i) {
 
-        offsetSum +=
-            reference.meanDb[i] -
-            target.meanDb[i];
+        const double position =
+            static_cast<double>(i) /
+            static_cast<double>(
+                kOffsetPoints - 1u);
+
+        const double frequency =
+            std::exp(
+                std::log(
+                    ToneMatchAnalyzer::kCurveMinimumHz) +
+                (std::log(
+                     std::min(
+                         ToneMatchAnalyzer::kCurveMaximumHz,
+                         reference.sampleRate * 0.45)) -
+                 std::log(
+                     ToneMatchAnalyzer::kCurveMinimumHz)) *
+                    position);
+
+        const double d =
+            sampleCurve(reference, frequency) -
+            sampleCurve(target, frequency);
+
+        if (std::isfinite(d)) {
+            offsetSum += d;
+            ++offsetCount;
+        }
     }
 
     const double levelOffsetDb =
-        static_cast<double>(
-            offsetSum /
-            static_cast<long double>(
-                kPoints));
+        offsetCount > 0u
+            ? static_cast<double>(
+                  offsetSum /
+                  static_cast<long double>(
+                      offsetCount))
+            : 0.0;
 
     const double logMinimum =
         std::log(
@@ -1078,11 +1154,50 @@ void verifyFirTracksMeasuredDifferenceCurve() {
                  logMinimum) *
                     position);
 
+        const auto differenceAt =
+            [&](double f) {
+                return
+                    sampleCurve(reference, f) -
+                    sampleCurve(target, f) -
+                    levelOffsetDb;
+            };
+
+        const double center =
+            differenceAt(frequency);
+
+        const double lower =
+            differenceAt(
+                std::max(
+                    ToneMatchAnalyzer::kCurveMinimumHz,
+                    frequency / 1.025));
+
+        const double upper =
+            differenceAt(
+                std::min(
+                    std::min(
+                        ToneMatchAnalyzer::kCurveMaximumHz,
+                        reference.sampleRate * 0.45),
+                    frequency * 1.025));
+
+        const double neighbourMean =
+            0.5 * (lower + upper);
+
+        const double localSpread =
+            std::abs(lower - upper);
+
+        const bool isolatedSpike =
+            std::abs(
+                center -
+                neighbourMean) >
+            std::max(
+                3.0,
+                2.5 * localSpread);
+
         const double desired =
             std::clamp(
-                (reference.meanDb[i] -
-                 target.meanDb[i]) -
-                    levelOffsetDb,
+                isolatedSpike
+                    ? neighbourMean
+                    : center,
                 -24.0,
                 24.0);
 
