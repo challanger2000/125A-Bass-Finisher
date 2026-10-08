@@ -78,3 +78,14 @@ Do not label the current branch RELEASE READY until:
 2. the exact VST3 artifact handed to the user is taken from that full release QA run.
 
 No subjective hearing result is required to substitute for any of the objective gates above.
+
+
+## Final GUI asset verification
+
+- Shared Finisher gunmetal ring assets are integrated for S / M / H controls with explicit 100% and 150% raster selection.
+- The successful asset path fully replaces the legacy procedural bezel and machined-steel skirt; legacy hardware remains only as a resource-load fallback.
+- Windows build **#104** on commit `d87d5fba8709060711ad496996db0d4ddef3b3ee` is green.
+- Visual host verification in Studio One: user confirmed correct concentric placement, complete legacy-ring replacement and clean appearance at both **100%** and **150%** zoom.
+- This GUI-only change does not alter parameter IDs, DSP, state format or automation semantics.
+
+The Full Release QA below is intentionally rerun after this GUI change so the final release artifact is taken from the exact audited current head.
